@@ -51,14 +51,14 @@ public static class CategoryAssistancePolicy
 	public static bool CanEnroll(bool authenticatedReceiptWriterAuthorized, bool isPostConsentSave, CategoryAssistanceSettings settings) =>
 		authenticatedReceiptWriterAuthorized && isPostConsentSave && IsValid(settings) && settings.Enabled;
 
-	/// <summary>Rows created by legacy observation are not deliberate clears. Eligibility still requires save/exclusion evidence.</summary>
+	/// <summary>Untyped legacy and restructure rows are not deliberate clears. Eligibility still requires save/exclusion evidence.</summary>
 	public static CategoryAssistanceClassificationState ClassificationState(PurchaseClassification? current) => current switch
 	{
 		{ Source: "manual" } => CategoryAssistanceClassificationState.ManualChoice,
 		{ CategoryId: not null } => CategoryAssistanceClassificationState.ProtectedAssignment,
-		{ Source: "legacy_write", LegacyResolution: "unresolved_path" } => CategoryAssistanceClassificationState.UnresolvedObservation,
-		{ Source: "legacy_import" } => CategoryAssistanceClassificationState.UnresolvedObservation,
 		null => CategoryAssistanceClassificationState.Unassigned,
+		_ when AutomationEligibility.IsUntyped(current.Source, current.CategoryId, current.LegacyResolution)
+			=> CategoryAssistanceClassificationState.UnresolvedObservation,
 		_ => CategoryAssistanceClassificationState.Unknown
 	};
 

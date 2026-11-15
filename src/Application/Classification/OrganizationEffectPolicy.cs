@@ -21,7 +21,7 @@ public enum OrganizationEligibility
 public static class OrganizationEffectPolicy
 {
 	/// <summary>
-	/// Only absent assignments and known unresolved legacy observations are eligible. A deliberate
+	/// Only absent and untyped assignments (see AutomationEligibility) are eligible. A deliberate
 	/// manual null is a choice, not an unresolved observation. Existing automation is preserved here;
 	/// correction of still-owned effects requires a separate explicit reconciliation policy.
 	/// </summary>
@@ -35,9 +35,9 @@ public static class OrganizationEffectPolicy
 		{
 			{ Source: "manual" } => OrganizationEligibility.ManualChoice,
 			{ CategoryId: not null } => OrganizationEligibility.ExistingAssignment,
-			{ Source: "legacy_import" } => OrganizationEligibility.Eligible,
-			{ Source: "legacy_write", LegacyResolution: "unresolved_path" } => OrganizationEligibility.Eligible,
 			null => OrganizationEligibility.Eligible,
+			_ when AutomationEligibility.IsUntyped(current.Source, current.CategoryId, current.LegacyResolution)
+				=> OrganizationEligibility.Eligible,
 			_ => OrganizationEligibility.UnknownProvenance
 		};
 	}
