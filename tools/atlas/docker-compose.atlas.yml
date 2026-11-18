@@ -6,6 +6,7 @@ services:
   app:
     environment:
       - AtlasBridge__Url=http://atlas-bridge:8675
+      - AtlasBridge__PaperlessBrowserUrl=${ATLAS_PAPERLESS_BROWSER_URL:-}
       - AtlasBridge__OperatorKeyFile=/run/secrets/atlas-operator-secret
     secrets:
       - atlas-operator-secret
