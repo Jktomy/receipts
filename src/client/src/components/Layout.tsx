@@ -90,6 +90,7 @@ const NAV: readonly NavSection[] = [
       { to: "/admin/category-assistance", label: "Category Assistance", icon: Icon.Settings, admin: true },
       { to: "/admin/restructure", label: "Restructure Categories", icon: Icon.Sliders, admin: true },
       { to: "/admin/users", label: "Users", icon: Icon.Users, admin: true },
+      { to: "/admin/paperless-inbox", label: "Paperless Inbox", icon: Icon.Receipt, admin: true },
       { to: "/audit", label: "Audit", icon: Icon.Clock, admin: true },
       { to: "/trash", label: "Trash", icon: Icon.Trash, admin: true },
       {
