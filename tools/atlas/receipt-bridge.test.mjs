@@ -146,10 +146,10 @@ test("Firefly cross-origin pagination is rejected without leaking token",async()
   await assert.rejects(getFireflyWithdrawals(m.fetcher,config,"2026-11-16","2026-11-18"),/changed origin/);
   assert.equal(m.calls.length,1);
 });
-async function exerciseBridge(fn,{draft=good,document={},fireflyPages}={}) {
+async function exerciseBridge(fn,{draft=good,document={},fireflyPages,overrides={}}={}) {
   const dir=mkdtempSync(join(tmpdir(),"atlas-bridge-test-"));
   const m=mock({draft,document,fireflyPages});
-  const bridge=createAtlasBridge(config,{fetcher:m.fetcher,dataDir:dir});
+  const bridge=createAtlasBridge({...config,...overrides},{fetcher:m.fetcher,dataDir:dir});
   await new Promise(resolve=>bridge.server.listen(0,"127.0.0.1",resolve));
   const port=bridge.server.address().port;
   const url="http://127.0.0.1:"+port;
@@ -219,4 +219,23 @@ test("Firefly match endpoint cannot mutate ledger and requires a reviewed source
     assert.equal((await resp.json()).status,"UNMATCHED");
     assert.ok(calls.filter(c=>c.host==="firefly.test").every(c=>c.method==="GET"));
   });
+});
+
+test("explicit opt-in imports only high-quality evidence with no Firefly writes",async()=>{
+  await exerciseBridge(async({url,bridge,calls})=>{
+    const webhook=await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    assert.equal(webhook.status,202);
+    const state=await untilReady(bridge,44);
+    assert.equal(state.status,"IMPORTED");
+    assert.equal(calls.filter(c=>c.host==="receipts.test"&&c.method==="POST").length,1);
+    assert.equal(calls.filter(c=>c.host==="firefly.test").length,0);
+  },{overrides:{autoImport:true}});
+});
+test("auto import never writes a low-confidence receipt",async()=>{
+  await exerciseBridge(async({url,bridge,calls})=>{
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    const state=await untilReady(bridge,44);
+    assert.equal(state.status,"REVIEW_REQUIRED");
+    assert.equal(calls.some(c=>c.host==="receipts.test"),false);
+  },{overrides:{autoImport:true},draft:{...good,confidence:"low"}});
 });
