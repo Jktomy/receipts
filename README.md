@@ -152,6 +152,10 @@ See **[docs/deployment.md](docs/deployment.md)** for HTTPS, backups, and updates
 
 The REST API is fully documented with OpenAPI metadata — run the app and open `/scalar` for an interactive reference.
 
+## Atlas fork integration
+
+This fork contains an [offline, read-only Firefly III receipt matcher](tools/atlas/README.md) and safer Docker Compose defaults. **No Firefly writer, automatic sync, or Paperless ingestion is enabled.** The Compose file defaults to a pinned upstream image; changes to application source or `docker-entrypoint.sh` require a separately built and verified fork image before they take effect. Do not deploy this branch to production without tests and explicit approval.
+
 ## License
 
-© Michael Garofalo. All rights reserved.
+MIT License. Copyright (c) 2026 Michael Garofalo. See [LICENSE](LICENSE) for the complete permissions and required notice.

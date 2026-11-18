@@ -1,0 +1,34 @@
+name: Atlas Receipts Bridge Tests
+
+on:
+  push:
+    branches:
+      - main
+      - "atlas/**"
+    paths:
+      - "tools/atlas/**"
+      - ".github/workflows/atlas-bridge-tests.yml"
+  pull_request:
+    paths:
+      - "tools/atlas/**"
+      - ".github/workflows/atlas-bridge-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  atlas-synthetic:
+    name: Offline OCR / Receipts / Firefly contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check JavaScript syntax
+        run: |
+          node --check tools/atlas/receipt-match.mjs
+          node --check tools/atlas/receipt-bridge-core.mjs
+          node --check tools/atlas/receipt-bridge-server.mjs
+      - name: Run isolated synthetic tests
+        run: node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs

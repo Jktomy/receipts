@@ -83,14 +83,8 @@ echo "Seeding database..."
 gosu app dotnet tools/DbSeeder/DbSeeder.dll
 
 if [ ! -f /data/.seeded ]; then
-    echo ""
-    echo "========================================"
-    echo "  Admin credentials (first launch)"
-    echo "  Email:    ${AdminSeed__Email}"
-    echo "  Password: ${AdminSeed__Password}"
-    echo "  Change this password immediately."
-    echo "========================================"
-    echo ""
+    echo "Initial admin account seeded. Retrieve bootstrap credentials from the protected secrets volume."
+    echo "Change the administrator password immediately; it is never printed to application logs."
     gosu app touch /data/.seeded
 fi
 

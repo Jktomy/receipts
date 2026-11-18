@@ -1,0 +1,81 @@
+# Opt-in Atlas review overlay for the existing Receipts stack.
+# No production workflow is enabled by this file alone.
+services:
+  atlas-bridge:
+    profiles: ["atlas-review"]
+    build:
+      context: .
+      dockerfile: tools/atlas/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - app
+    read_only: true
+    user: "1000:1000"
+    ports:
+      - "${ATLAS_BRIDGE_PUBLIC_BIND:-127.0.0.1}:${ATLAS_BRIDGE_PORT:-8675}:8675"
+    environment:
+      - ATLAS_BRIDGE_BIND=0.0.0.0
+      - ATLAS_BRIDGE_PORT=8675
+      - ATLAS_BRIDGE_DATA_DIR=/data
+      - ATLAS_PAPERLESS_URL=${ATLAS_PAPERLESS_URL:?Set internal Paperless URL}
+      - ATLAS_PAPERLESS_INSTANCE=${ATLAS_PAPERLESS_INSTANCE:?Set stable Paperless instance ID}
+      - ATLAS_PAPERLESS_RECEIPT_TAG_ID=${ATLAS_PAPERLESS_RECEIPT_TAG_ID:?Select receipt-analysis tag}
+      - ATLAS_PAPERLESS_BLOCKED_TAG_IDS=${ATLAS_PAPERLESS_BLOCKED_TAG_IDS:-}
+      - ATLAS_OPEN_LYRIC_URL=${ATLAS_OPEN_LYRIC_URL:?Set private Oathgate endpoint}
+      - ATLAS_OPEN_LYRIC_MODEL=${ATLAS_OPEN_LYRIC_MODEL:-Open_Lyric}
+      - ATLAS_RECEIPTS_URL=http://app:8080
+      - ATLAS_FIREFLY_URL=${ATLAS_FIREFLY_URL:-}
+      - ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING=${ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING:-0}
+      # Separate approval gate: keep false until reviewed synthetic acceptance.
+      - ATLAS_AUTO_IMPORT_ENABLED=${ATLAS_AUTO_IMPORT_ENABLED:-0}
+      - ATLAS_PAPERLESS_TOKEN_FILE=/run/secrets/atlas-paperless-token
+      - ATLAS_OPEN_LYRIC_TOKEN_FILE=/run/secrets/atlas-open-lyric-token
+      - ATLAS_RECEIPTS_API_KEY_FILE=/run/secrets/atlas-receipts-api-key
+      - ATLAS_WEBHOOK_SECRET_FILE=/run/secrets/atlas-webhook-secret
+      - ATLAS_OPERATOR_SECRET_FILE=/run/secrets/atlas-operator-secret
+      - ATLAS_FIREFLY_TOKEN_FILE=/run/secrets/atlas-firefly-token
+    secrets:
+      - atlas-paperless-token
+      - atlas-open-lyric-token
+      - atlas-receipts-api-key
+      - atlas-webhook-secret
+      - atlas-operator-secret
+      - atlas-firefly-token
+    volumes:
+      - atlas-bridge-data:/data
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - receipts-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8675/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+
+secrets:
+  atlas-paperless-token:
+    file: ${ATLAS_PAPERLESS_TOKEN_FILE:?Provide Paperless token file path}
+  atlas-open-lyric-token:
+    file: ${ATLAS_OPEN_LYRIC_TOKEN_FILE:?Provide Oathgate token file path}
+  atlas-receipts-api-key:
+    file: ${ATLAS_RECEIPTS_API_KEY_FILE:?Provide Receipts API key file path}
+  atlas-webhook-secret:
+    file: ${ATLAS_WEBHOOK_SECRET_FILE:?Provide webhook secret file path}
+  atlas-operator-secret:
+    file: ${ATLAS_OPERATOR_SECRET_FILE:?Provide operator secret file path}
+  atlas-firefly-token:
+    file: ${ATLAS_FIREFLY_TOKEN_FILE:?Provide Firefly token file path}
+
+volumes:
+  atlas-bridge-data:
