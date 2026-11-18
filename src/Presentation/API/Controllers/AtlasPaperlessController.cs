@@ -50,7 +50,7 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		bool allowed = url.Scheme == Uri.UriSchemeHttp &&
 					   (url.Host == "atlas-bridge" ||
 						(url.IsLoopback && url.Port == 8675)) &&
-				   url.Port == 8675;
+					   url.Port == 8675;
 		if (!allowed || !System.IO.File.Exists(secretPath))
 		{
 			return null;
