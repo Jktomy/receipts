@@ -50,6 +50,39 @@ function normalizeDescription(v) {
 const allowedAdjustments = new Set(["tip", "discount", "rounding", "loyaltyRedemption", "coupon", "storeCredit", "other"]);
 const debitAdjustments = new Set(["discount", "loyaltyRedemption", "coupon", "storeCredit"]);
 
+/**
+ * Persist only the defined purchase fields. Model responses and operator
+ * corrections are not allowed to introduce account numbers, narrative notes,
+ * hidden instruction fields, or arbitrary personally identifying metadata.
+ */
+export function sanitizePurchaseDraft(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid purchase draft");
+  const pick = (v, n = 300) => typeof v === "string" ? v.slice(0, n) : "";
+  return {
+    merchant: pick(raw.merchant, 180),
+    merchantEvidence: pick(raw.merchantEvidence),
+    date: pick(raw.date, 10),
+    dateEvidence: pick(raw.dateEvidence),
+    total: pick(raw.total, 30),
+    totalEvidence: pick(raw.totalEvidence),
+    tax: pick(raw.tax ?? "0", 30),
+    currency: pick(raw.currency ?? "USD", 3),
+    confidence: pick(raw.confidence, 10),
+    hasRefunds: raw.hasRefunds === true,
+    mixedTender: raw.mixedTender === true,
+    items: Array.isArray(raw.items) ? raw.items.slice(0, 200).map(item => ({
+      description: pick(item?.description, 200), sku: pick(item?.sku, 80),
+      evidence: pick(item?.evidence, 300),
+      quantity: pick(item?.quantity ?? "1", 30),
+      unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30)
+    })) : [],
+    adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
+      type: pick(adjustment?.type, 30), amount: pick(adjustment?.amount, 30),
+      description: pick(adjustment?.description, 200)
+    })) : []
+  };
+}
+
 export function qualifyItemization(raw, ocrText) {
   const problems = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, problems: ["No structured document"] };
