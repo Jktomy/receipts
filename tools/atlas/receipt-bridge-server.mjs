@@ -161,6 +161,26 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         }
         return safeJson(response, 202, { paperlessId: id, status: "ACCEPTED" });
       }
+      if (request.method === "GET" && path === "/drafts") {
+        // Bounded operator queue; no originals or full OCR are in this state.
+        const ids = readdirSync(dataDir)
+          .filter(name => /^paperless-[1-9][0-9]*\\.json$/.test(name))
+          .map(name => Number(name.slice(10, -5)))
+          .filter(Number.isSafeInteger)
+          .sort((a, b) => b - a)
+          .slice(0, 100);
+        const drafts = ids.map(id => {
+          const state = getState(dataDir, id);
+          return state && {
+            paperlessId: id, status: state.status, modified: state.modified,
+            problems: state.problems ?? [], receiptId: state.receiptId ?? null,
+            merchant: state.draft?.merchant ?? null,
+            date: state.draft?.date ?? null,
+            total: state.draft?.total ?? null
+          };
+        }).filter(Boolean);
+        return safeJson(response, 200, { drafts, limit: 100 });
+      }
       const match = /^\/drafts\/([1-9][0-9]*)(?:\/(import|match))?$/.exec(path);
       if (!match) return safeJson(response, 404, { error: "Not found" });
       const id = Number(match[1]);
