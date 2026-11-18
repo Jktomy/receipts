@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  moneyCents, quantityThousandths, qualifyItemization, stableSourceRequestId,
+  moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
   toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric,
   getFireflyWithdrawals, suggestFireflyLink
 } from "./receipt-bridge-core.mjs";
@@ -67,7 +67,8 @@ const fireflySnapshot = { data: [fireflyOne], links: { next: null }, meta: { pag
 test("money and quantity preserve exact decimals without JS float rounding", () => {
   assert.equal(moneyCents("3.99"), 399n);
   assert.equal(moneyCents("-1.00", {allowNegative:true}), -100n);
-  assert.equal(quantityThousandths("1.375"), 1375n);
+  assert.equal(quantityTenThousandths("1.3750"), 13750n);
+  assert.equal(unitPriceTenThousandths("3.4590"), 34590n);
   assert.throws(() => moneyCents("1.001"));
   assert.throws(() => moneyCents("-1.00"));
 });
@@ -85,6 +86,23 @@ test("bad OCR line, guessed product, wrong arithmetic, and low confidence are bl
   assert.equal(qualifyItemization({...good,totalEvidence:"TOTAL 0.01"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,confidence:"low"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,items:[{...good.items[0],total:"3.98"}]},ocr).ok,false);
+});
+test("weighed produce retains four-decimal quantity and unit price", () => {
+  const text="PRODUCE TOMATO 1.2500 LB @2.4599 3.07\\nTOTAL 3.07\\n11/18/2026\\nMARKET";
+  const raw={
+    merchant:"Market",merchantEvidence:"MARKET",
+    date:"2026-11-18",dateEvidence:"11/18/2026",
+    total:"3.07",totalEvidence:"TOTAL 3.07",
+    tax:"0.00",confidence:"high",currency:"USD",
+    items:[{description:"Tomato by pound",evidence:"PRODUCE TOMATO 1.2500 LB @2.4599 3.07",
+      quantity:"1.2500",unitPrice:"2.4599",total:"3.07"}],
+    adjustments:[]
+  };
+  const result=qualifyItemization(raw,text);
+  assert.deepEqual(result.problems,[]);
+  assert.equal(result.ok,true);
+  assert.equal(result.items[0].quantity,1.25);
+  assert.equal(result.items[0].unitPrice,2.4599);
 });
 test("import payload is idempotent and does not create a Receipts payment transaction", () => {
   const q = qualifyItemization(good,ocr);
