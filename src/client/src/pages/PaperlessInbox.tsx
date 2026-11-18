@@ -80,6 +80,7 @@ function Field({ label, value, onChange }: {
 export default function PaperlessInbox() {
   usePageTitle("Paperless Review");
   const [configured, setConfigured] = useState(false);
+  const [paperlessBrowserUrl, setPaperlessBrowserUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<DraftSummary[]>([]);
@@ -94,7 +95,8 @@ export default function PaperlessInbox() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const status = await atlasApi<{ configured: boolean }>("/api/atlas/paperless/status");
+      const status = await atlasApi<{ configured: boolean; paperlessBrowserUrl?: string | null }>("/api/atlas/paperless/status");
+      setPaperlessBrowserUrl(status.paperlessBrowserUrl ?? null);
       setConfigured(status.configured);
       if (status.configured) {
         const result = await atlasApi<{ drafts: DraftSummary[] }>("/api/atlas/paperless/drafts");
@@ -211,6 +213,11 @@ export default function PaperlessInbox() {
               <div className="space-y-4">
                 <div>
                   <h2 className="font-semibold">Paperless document #{selected.paperlessId}</h2>
+                  {paperlessBrowserUrl && (
+                    <a href={`${paperlessBrowserUrl}/documents/${selected.paperlessId}/details`} target="_blank" rel="noopener noreferrer" className="text-sm underline">
+                      Open original in Paperless
+                    </a>
+                  )}
                   <p className="text-xs text-muted-foreground">Status: {selected.status} · Originals remain in Paperless</p>
                   {selected.receiptId && (
                     <Link to={`/receipts/${selected.receiptId}`} className="text-sm underline">Open imported receipt</Link>
