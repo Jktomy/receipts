@@ -74,13 +74,22 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (previous?.contentHash === source.contentHash && ["READY_FOR_REVIEW", "REVIEW_REQUIRED"].includes(previous.status)) return;
       const parsed = await extractUsingOpenLyric(fetcher, config, source.content);
       const qualified = qualifyItemization(parsed, source.content);
-      setState(dataDir, id, {
+      const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
         problems: qualified.problems,
         // No original PDF, card number, bank details or full OCR text stored here.
         draft: parsed
-      });
+      };
+      // Auto-import remains disabled by default. It requires an explicit config
+      // opt-in AND all independent OCR evidence/decimal checks to pass.
+      // Firefly is not modified in either mode.
+      if (config.autoImport === true && qualified.ok) {
+        const saved = await importQualifiedReceipt(fetcher, config, qualified, id);
+        state.status = "IMPORTED";
+        state.receiptId = saved.receiptId;
+      }
+      setState(dataDir, id, state);
     } catch (error) {
       const old = getState(dataDir, id);
       setState(dataDir, id, {
@@ -130,7 +139,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     const url = new URL(request.url ?? "/", "http://localhost");
     const path = url.pathname;
     if (request.method === "GET" && path === "/healthz") {
-      return safeJson(response, 200, { status: "ok", fireflyWriteAccess: false, mode: "REVIEW_ONLY" });
+      return safeJson(response, 200, { status: "ok", fireflyWriteAccess: false, mode: config.autoImport === true ? "QUALIFIED_AUTO_IMPORT" : "REVIEW_ONLY" });
     }
     const isWebhook = request.method === "POST" && path === "/hooks/paperless";
     const authorized = isWebhook
@@ -213,7 +222,8 @@ if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.arg
     fireflyToken: process.env.ATLAS_FIREFLY_TOKEN_FILE ? secret("ATLAS_FIREFLY_TOKEN") : undefined,
     webhookSecret: secret("ATLAS_WEBHOOK_SECRET"),
     operatorSecret: secret("ATLAS_OPERATOR_SECRET"),
-    allowCloudProcessing: process.env.ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING === "1"
+    allowCloudProcessing: process.env.ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING === "1",
+    autoImport: process.env.ATLAS_AUTO_IMPORT_ENABLED === "1"
   };
   const bind = process.env.ATLAS_BRIDGE_BIND || "127.0.0.1";
   const port = Number(process.env.ATLAS_BRIDGE_PORT || 8675);
