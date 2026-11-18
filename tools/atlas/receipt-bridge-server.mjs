@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, exists
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import {
-  getPaperlessText, extractUsingOpenLyric, qualifyItemization,
+  getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
   importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink
 } from "./receipt-bridge-core.mjs";
 
@@ -72,7 +72,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         return;
       }
       if (previous?.contentHash === source.contentHash && ["READY_FOR_REVIEW", "REVIEW_REQUIRED"].includes(previous.status)) return;
-      const parsed = await extractUsingOpenLyric(fetcher, config, source.content);
+      const parsed = sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, source.content));
       const qualified = qualifyItemization(parsed, source.content);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
@@ -194,7 +194,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         if (!previous?.contentHash || previous.receiptId) return safeJson(response, 409, { error: "No editable pending draft" });
         const edited = await jsonBody(request, 100000);
         // Still checked against immutable OCR evidence at import time.
-        setState(dataDir, id, { ...previous, draft: edited, status: "READY_FOR_REVIEW", problems: [] });
+        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [] });
         return safeJson(response, 200, { status: "DRAFT_UPDATED" });
       }
       if (request.method === "POST" && match[2] === "import") {
