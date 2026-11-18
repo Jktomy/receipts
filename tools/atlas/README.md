@@ -47,7 +47,7 @@ not the PDF. Paperless's original remains in its own archive.
 The bridge verifies the token, then reads:
 
     GET /api/documents/{id}/
-    Authorization: Token <Paperless read-only API token>
+    Authorization: Token *** read-only API token>
 
 It rejects documents without the expected tag, with configured blocked
 medical/sensitive tags, without latest OCR content, or with oversized text.
@@ -83,7 +83,7 @@ necessary but cannot prove that AI parsed a receipt perfectly.
 If the owner approves a draft, the adapter calls the existing Receipts API:
 
     POST /api/receipts/complete
-    X-API-Key: <Receipts key scoped to this operator>
+    X-API-Key: *** key scoped to this operator>
     {
       "clientRequestId": "<deterministic UUID from Paperless instance + document ID>",
       "receipt": { "location": "H-E-B", "date": "2026-11-18", "taxAmount": 0.61 },
@@ -122,20 +122,39 @@ Nearby ambiguous dates/merchants, refunds, mixed-account splits and repeated
 source documents remain REVIEW; nothing is automatically linked as authoritative.
 
 Current implementation: returns a PROPOSED_MATCH / REVIEW / UNMATCHED **suggestion**.
-It does not write to Firefly. Persisting a Firefly ID in the native Receipts
-schema and surfacing a "View matched transaction" link inside its GUI are
-follow-up source changes requiring migrations, tests and review.
+It does not write to Firefly. A reviewer can then POST the suggested transaction ID
+to confirm-match; the bridge verifies it still equals the current unique suggestion
+and stores a durable bridge-side association (confirmedFireflyTransactionId) with
+the draft — no Firefly write, no Receipts schema migration. Surfacing a
+"View matched transaction" link inside the native Receipts GUI remains a
+follow-up source change requiring review.
 
 ## Operator endpoints (private, authenticated)
 
 - GET /healthz — no sensitive data, reports whether review mode is enabled
 - POST /hooks/paperless — webhook token; asynchronous queue acceptance
-- GET /drafts/{paperlessId} — operator token; inspect draft and status
+- GET /drafts/{paperlessId} — operator token; inspect draft, status, draftRevision
+  and any confirmed Firefly association
 - PUT /drafts/{paperlessId} — operator token; correct a pending draft (the same
-  OCR evidence checks still run before save)
-- POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create
+  OCR evidence checks still run before save). Returns the new draftRevision and
+  marks the draft reviewer-edited; a later OCR change then preserves these
+  corrections instead of silently replacing them.
+- POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create.
+  Accepts an optional { "expectedRevision" }: when present, a stale approval is
+  rejected with 409 instead of importing a newer draft. Concurrent approvals are
+  serialized; the second sees the recorded receiptId (idempotent replay), never
+  a duplicate purchase. An import attempted after the OCR changed is rejected
+  with 409 until the draft is corrected and saved again.
 - POST /drafts/{paperlessId}/match — operator token; provide a reviewed
   fireflySourceAccountId, return read-only Firefly candidate IDs
+- POST /drafts/{paperlessId}/confirm-match — operator token; provide the
+  suggested fireflyTransactionId plus fireflySourceAccountId. Stored only when
+  it still equals the current unique PROPOSED_MATCH; rejected with 409
+  otherwise. Never writes to Firefly.
+
+Malformed JSON request bodies fail with 400 (not a generic 422); oversized
+bodies fail with 413; semantic validation failures keep 422 with a named
+problem. No tokens, OCR text, model output or payment data appear in errors.
 
 Paperless webhook uses X-Atlas-Hook-Key. Operator endpoints use
 X-Atlas-Operator-Key. These are separate high-entropy secrets.
@@ -181,7 +200,11 @@ separately built, tested and pinned fork image is deployed.
 - **VERIFIED (synthetic):** source tag filters, OCR evidence, exact receipt
   totals, weighed products, webhook auth, reviewed create, opt-in create,
   duplicate request protection, source revision mismatch and Firefly GET-only
-  candidate evaluation.
+  candidate evaluation. Plus: malformed JSON fails 400 (not generic 422),
+  reviewer draft revisions reject stale approvals, concurrent approvals cannot
+  duplicate, OCR changes preserve reviewer corrections until re-review, and
+  confirm-match stores a durable bridge-side payment association with zero
+  Firefly writes.
 - **NOT VERIFIED:** real Paperless webhook delivery to this bridge,
   live Open Lyric extraction accuracy, live Receipts database persistence and
   restores, production credentials, native GUI end-to-end behavior, and
@@ -190,6 +213,18 @@ separately built, tested and pinned fork image is deployed.
 - **No protected data** was read or stored during the implementation/testing.
 - Native Paperless and Midas workflows, current Receipt Wrangler and the
   production Receipts deployment remain unchanged.
+
+### Bridge state backup and restore (isolated test stacks only)
+
+The bridge keeps one JSON file per Paperless document in its data directory
+(ATLAS_BRIDGE_DATA_DIR, default ./atlas-receipts-data). To back up: stop only
+the bridge container/service, copy the whole data directory to versioned
+storage, record its file list with SHA-256 hashes. To restore: stop the
+bridge, replace the data directory with the verified copy, re-check hashes,
+restart, then GET /drafts and one known /drafts/{id} and compare
+status/draftRevision/receiptId/confirmedFireflyTransactionId against the
+recorded values. Never copy production PostgreSQL, Paperless originals or
+secret files as part of this procedure; secrets live only in mounted files.
 
 ### Rollback
 
