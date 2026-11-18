@@ -164,7 +164,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (request.method === "GET" && path === "/drafts") {
         // Bounded operator queue; no originals or full OCR are in this state.
         const ids = readdirSync(dataDir)
-          .filter(name => /^paperless-[1-9][0-9]*\\.json$/.test(name))
+          .filter(name => /^paperless-[1-9][0-9]*[.]json$/.test(name))
           .map(name => Number(name.slice(10, -5)))
           .filter(Number.isSafeInteger)
           .sort((a, b) => b - a)
