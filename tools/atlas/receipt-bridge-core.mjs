@@ -16,12 +16,20 @@ export function moneyCents(raw, { allowNegative = false, allowZero = true } = {}
   return neg ? -value : value;
 }
 
-export function quantityThousandths(raw) {
+export function quantityTenThousandths(raw) {
   const s = String(raw ?? "");
-  if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,3})?$/.test(s)) throw new Error("Invalid quantity");
+  if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,4})?$/.test(s)) throw new Error("Invalid quantity");
   const [whole, fractional = ""] = s.split(".");
-  const value = BigInt(whole) * 1000n + BigInt(fractional.padEnd(3, "0"));
-  if (value < 1n || value > 100000000n) throw new Error("Quantity outside safe bounds");
+  const value = BigInt(whole) * 10000n + BigInt(fractional.padEnd(4, "0"));
+  if (value < 1n || value > 1000000000n) throw new Error("Quantity outside safe bounds");
+  return value;
+}
+export function unitPriceTenThousandths(raw) {
+  const s = String(raw ?? "");
+  if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,4})?$/.test(s)) throw new Error("Invalid unit price");
+  const [whole, fractional = ""] = s.split(".");
+  const value = BigInt(whole) * 10000n + BigInt(fractional.padEnd(4, "0"));
+  if (value < 1n || value > 1000000000000n) throw new Error("Unit price outside safe bounds");
   return value;
 }
 
@@ -65,12 +73,12 @@ export function qualifyItemization(raw, ocrText) {
     const description = normalizeDescription(rawItem?.description);
     let quantity, unitPrice, extended;
     try {
-      quantity = quantityThousandths(rawItem?.quantity ?? "1");
-      unitPrice = moneyCents(rawItem?.unitPrice, { allowZero: false });
+      quantity = quantityTenThousandths(rawItem?.quantity ?? "1");
+      unitPrice = unitPriceTenThousandths(rawItem?.unitPrice);
       extended = moneyCents(rawItem?.total, { allowZero: false });
-      // The Receipts API accepts unit price, then calculates the line extension.
-      // Require agreement at the cent; do not silently repair OCR/LLM arithmetic.
-      const expected = (quantity * unitPrice + 500n) / 1000n;
+      // Both quantity and unit price have four-decimal precision in Receipts.
+      // BigInt keeps the rounding to cents exact for weighed groceries.
+      const expected = (quantity * unitPrice + 500000n) / 1000000n;
       if (expected !== extended) throw new Error("Line extension does not equal unit price times quantity");
     } catch {
       problems.push("Line math requires review");
@@ -83,7 +91,7 @@ export function qualifyItemization(raw, ocrText) {
       problems.push("Item lacks verbatim source evidence");
     }
     const code = typeof rawItem?.sku === "string" ? rawItem.sku.slice(0, 80) : null;
-    items.push({ description, quantity: Number(quantity) / 1000, unitPrice: amountNumber(unitPrice), receiptItemCode: code });
+    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code });
     subtotal += extended;
   }
   const adjustments = [];
@@ -173,7 +181,7 @@ const extractionRules = [
   "confidence ('high' only if all figures and line evidence are clear), hasRefunds, mixedTender,",
   "merchantEvidence, dateEvidence, totalEvidence: short verbatim substrings of the supplied OCR.",
   "items array of {description, sku, quantity, unitPrice, total, evidence}, and adjustments array",
-  "of {type, amount, description}. All money fields must be decimal strings with two decimals.",
+  "of {type, amount, description}. Totals, tax and adjustments must be decimal strings with two decimals; quantity and unitPrice may use four decimals.",
   "Each evidence must be copied verbatim from a line in the supplied OCR.",
   "Separate signed discounts and coupons into adjustments (negative amounts); use tip/other for additions.",
   "Never invent products, categories, quantities, card numbers, account IDs, or missing amounts.",
