@@ -136,7 +136,6 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 			{
 				return StatusCode(503, new { error = "Private bridge route rejected" });
 			}
-
 			using var request = new HttpRequestMessage(method, target);
 			request.Headers.Add("X-Atlas-Operator-Key", config.Value.Secret);
 			request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
