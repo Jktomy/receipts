@@ -33,6 +33,10 @@ jobs:
           for name in paperless open-lyric receipts webhook operator firefly; do
             printf 'synthetic-ci-secret-not-real-1234567890' > "$secret_dir/$name"
           done
+          # The image runs as uid 1000; root-owned mktemp directories default to 0700.
+          # These credentials are fake test strings, never actual personal secrets.
+          chmod 755 "$secret_dir"
+          chmod 444 "$secret_dir/"*
           docker run -d --name atlas-test-bridge \
             --publish 127.0.0.1:8675:8675 \
             --mount "type=bind,src=$secret_dir,dst=/run/secrets,readonly" \
