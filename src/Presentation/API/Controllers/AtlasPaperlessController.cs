@@ -20,7 +20,6 @@ namespace API.Controllers;
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AtlasPaperlessController(IConfiguration configuration) : ControllerBase
 {
-
 	private static readonly HttpClient Bridge = new(new HttpClientHandler
 	{
 		AllowAutoRedirect = false,
@@ -30,7 +29,6 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 	{
 		Timeout = TimeSpan.FromSeconds(30)
 	};
-
 
 	private (Uri Url, string Secret)? PrivateBridge()
 	{
@@ -46,13 +44,12 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 			return null;
 		}
 
-
 		// Never turn this authenticated controller into a general SSRF proxy.
 		// Loopback is valid for a same-host development bridge; atlas-bridge is
 		// the exact private Compose DNS name. External URLs are not accepted.
 		bool allowed = url.Scheme == Uri.UriSchemeHttp &&
-				   (url.Host == "atlas-bridge" ||
-					(url.IsLoopback && url.Port == 8675)) &&
+					   (url.Host == "atlas-bridge" ||
+						(url.IsLoopback && url.Port == 8675)) &&
 				   url.Port == 8675;
 		if (!allowed || !System.IO.File.Exists(secretPath))
 		{
@@ -63,13 +60,12 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		{
 			secret = System.IO.File.ReadAllText(secretPath).Trim();
 		}
-		catch (Exception exception when (exception is IOException or UnauthorizedAccessException))
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
 			return null;
 		}
 		return secret.Length >= 16 ? (url, secret) : null;
 	}
-
 
 	[HttpGet("status")]
 	public IActionResult Status()
@@ -85,22 +81,18 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		return Ok(new { configured = PrivateBridge() is not null, paperlessBrowserUrl = paperlessUiUrl?.TrimEnd('/') });
 	}
 
-
 	[HttpGet("drafts")]
 	public Task<IActionResult> List(CancellationToken ct) => Forward(HttpMethod.Get, "drafts", null, ct);
-
 
 	[HttpGet("drafts/{id:int}")]
 	public Task<IActionResult> Get(int id, CancellationToken ct) =>
 		id > 0 ? Forward(HttpMethod.Get, $"drafts/{id}", null, ct) :
 		Task.FromResult<IActionResult>(BadRequest(new { error = "Invalid document ID" }));
 
-
 	[HttpPut("drafts/{id:int}")]
 	public Task<IActionResult> Correct(int id, [FromBody] System.Text.Json.JsonElement body, CancellationToken ct) =>
 		id > 0 ? Forward(HttpMethod.Put, $"drafts/{id}", body.GetRawText(), ct) :
 		Task.FromResult<IActionResult>(BadRequest(new { error = "Invalid document ID" }));
-
 
 	[HttpPost("drafts/{id:int}/import")]
 	public async Task<IActionResult> Import(int id, CancellationToken ct)
@@ -126,7 +118,6 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		id > 0 ? Forward(HttpMethod.Post, $"drafts/{id}/confirm-match", body.GetRawText(), ct) :
 		Task.FromResult<IActionResult>(BadRequest(new { error = "Invalid document ID" }));
 
-
 	private async Task<IActionResult> Forward(HttpMethod method, string path, string? body, CancellationToken ct)
 	{
 		Response.Headers.CacheControl = "no-store";
@@ -139,14 +130,12 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 				return StatusCode(503, new { error = "Atlas Paperless bridge is not configured" });
 			}
 
-
 			// Only constant route prefixes and bounded integer IDs reach the bridge.
 			var target = new Uri(config.Value.Url, "/" + path);
 			if (target.Host != config.Value.Url.Host || target.Port != config.Value.Url.Port)
 			{
 				return StatusCode(503, new { error = "Private bridge route rejected" });
 			}
-
 
 			using var request = new HttpRequestMessage(method, target);
 			request.Headers.Add("X-Atlas-Operator-Key", config.Value.Secret);
@@ -160,14 +149,12 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 				request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 			}
 
-
 			using HttpResponseMessage response = await Bridge.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 			if (!response.IsSuccessStatusCode &&
 				(response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect))
 			{
 				return StatusCode(502, new { error = "Bridge redirects are not allowed" });
 			}
-
 
 			if (response.Content.Headers.ContentLength > 1_000_000)
 			{
@@ -185,7 +172,7 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 				Content = json
 			};
 		}
-		catch (Exception ex when (ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException or ArgumentException))
+		catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException or ArgumentException)
 		{
 			return StatusCode(503, new { error = "Private Atlas bridge unavailable" });
 		}
