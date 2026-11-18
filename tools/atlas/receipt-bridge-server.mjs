@@ -145,7 +145,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         // can be safely requeued by posting the same document ID again.
         if (!active.has(id)) {
           const previous = getState(dataDir, id);
-          if (!previous?.receiptId) setState(dataDir, id, { ...(previous ?? {}), paperlessId: id, status: "QUEUED" });
+          if (!previous?.receiptId && !["READY_FOR_REVIEW", "REVIEW_REQUIRED"].includes(previous?.status)) {
+            setState(dataDir, id, { ...(previous ?? {}), paperlessId: id, status: "QUEUED" });
+          }
           void processDocument(id);
         }
         return safeJson(response, 202, { paperlessId: id, status: "ACCEPTED" });
@@ -195,7 +197,7 @@ function secret(name) {
   return readFileSync(file, "utf8").trim();
 }
 
-if (process.argv[1] && process.argv[1].endsWith("/receipt-bridge-server.mjs")) {
+if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.argv[1])) {
   const config = {
     paperlessUrl: process.env.ATLAS_PAPERLESS_URL,
     paperlessInstance: process.env.ATLAS_PAPERLESS_INSTANCE,
