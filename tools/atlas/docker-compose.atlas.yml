@@ -26,6 +26,8 @@ services:
       - ATLAS_RECEIPTS_URL=http://app:8080
       - ATLAS_FIREFLY_URL=${ATLAS_FIREFLY_URL:-}
       - ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING=${ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING:-0}
+      # Separate approval gate: keep false until reviewed synthetic acceptance.
+      - ATLAS_AUTO_IMPORT_ENABLED=${ATLAS_AUTO_IMPORT_ENABLED:-0}
       - ATLAS_PAPERLESS_TOKEN_FILE=/run/secrets/atlas-paperless-token
       - ATLAS_OPEN_LYRIC_TOKEN_FILE=/run/secrets/atlas-open-lyric-token
       - ATLAS_RECEIPTS_API_KEY_FILE=/run/secrets/atlas-receipts-api-key
