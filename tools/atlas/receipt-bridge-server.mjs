@@ -15,9 +15,15 @@ function validSecret(actual, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function bodyError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function docIdOf(body) {
   const id = Number(body?.documentId ?? body?.sourceId ?? body?.id);
-  if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647) throw new Error("Valid Paperless document ID required");
+  if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647) throw bodyError("Valid Paperless document ID required", 400);
   return id;
 }
 
@@ -45,9 +51,13 @@ async function jsonBody(request, max = 8000) {
   let text = "";
   for await (const chunk of request) {
     text += chunk.toString("utf8");
-    if (text.length > max) throw new Error("Request body too large");
+    if (text.length > max) throw bodyError("Request body too large", 413);
   }
-  return JSON.parse(text || "{}");
+  try {
+    return JSON.parse(text || "{}");
+  } catch {
+    throw bodyError("Malformed request body: invalid JSON", 400);
+  }
 }
 
 export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir = "./atlas-receipts-data" } = {}) {
@@ -71,13 +81,30 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         setState(dataDir, id, state);
         return;
       }
-      if (previous?.contentHash === source.contentHash && ["READY_FOR_REVIEW", "REVIEW_REQUIRED"].includes(previous.status)) return;
+      if (previous?.draft && source.contentHash === previous.contentHash) {
+        // Same OCR revision: never auto-clear a review state or discard corrections.
+        return;
+      }
+      if (previous?.draft && previous?.reviewerEdited) {
+        // OCR changed after a reviewer corrected the draft: keep the corrections and
+        // force re-review against the new text instead of silently replacing them.
+        setState(dataDir, id, {
+          ...previous,
+          contentHash: source.contentHash,
+          modified: source.modified,
+          status: "SOURCE_CHANGED_REVIEW",
+          reason: "Paperless OCR text changed after review: saved corrections need re-check"
+        });
+        return;
+      }
       const parsed = sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, source.content));
       const qualified = qualifyItemization(parsed, source.content);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
         problems: qualified.problems,
+        draftRevision: (previous?.draftRevision ?? 0) + 1,
+        reviewerEdited: false,
         // No original PDF, card number, bank details or full OCR text stored here.
         draft: parsed
       };
@@ -102,21 +129,34 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     }
   }
 
-  async function importReviewed(id) {
-    if (active.has(id)) return { status: 409, result: { error: "Processing still active" } };
+  async function importReviewed(id, expectedRevision) {
+    // Serialize concurrent approvals: the first import wins, the second sees the
+    // recorded receiptId (idempotent replay) instead of posting a duplicate.
+    if (active.has(id)) return { status: 409, result: { error: "Processing still active: retry shortly" } };
     const saved = getState(dataDir, id);
     if (!saved?.draft || !saved?.contentHash) return { status: 404, result: { error: "Draft not found" } };
     if (saved.receiptId) return { status: 200, result: { status: "IMPORTED", receiptId: saved.receiptId } };
-    const current = await getPaperlessText(fetcher, config, id);
-    if (current.contentHash !== saved.contentHash) {
-      setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import" });
-      return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
+    if (saved.status === "SOURCE_CHANGED_REVIEW") {
+      return { status: 409, result: { error: "Source changed after review: correct the draft and save before approving", reason: saved.reason } };
     }
-    const qualified = qualifyItemization(saved.draft, current.content);
-    if (!qualified.ok) return { status: 422, result: { error: "Itemization requires correction", problems: qualified.problems } };
-    const result = await importQualifiedReceipt(fetcher, config, qualified, id);
-    setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
-    return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
+    if (expectedRevision !== undefined && expectedRevision !== (saved.draftRevision ?? null)) {
+      return { status: 409, result: { error: "Draft changed since review: reload the draft before approving" } };
+    }
+    active.add(id);
+    try {
+      const current = await getPaperlessText(fetcher, config, id);
+      if (current.contentHash !== saved.contentHash) {
+        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import" });
+        return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
+      }
+      const qualified = qualifyItemization(saved.draft, current.content);
+      if (!qualified.ok) return { status: 422, result: { error: "Itemization requires correction", problems: qualified.problems } };
+      const result = await importQualifiedReceipt(fetcher, config, qualified, id);
+      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
+      return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
+    } finally {
+      active.delete(id);
+    }
   }
 
   async function matchReviewed(id, sourceAccountId) {
@@ -133,6 +173,28 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     const snapshot = await getFireflyWithdrawals(fetcher, config, start, end);
     const suggestion = suggestFireflyLink(qualified, id, sourceAccountId, snapshot);
     return { status: 200, result: suggestion };
+  }
+
+  async function confirmMatch(id, fireflyTransactionId, fireflySourceAccountId) {
+    // Durable, review-confirmed payment association stored inside the bridge only.
+    // Never writes to Firefly: the suggestion must already be a unique PROPOSED_MATCH
+    // for exactly this transaction, otherwise confirmation is rejected.
+    if (typeof fireflyTransactionId !== "string" || fireflyTransactionId.length < 1 || fireflyTransactionId.length > 80) {
+      return { status: 400, result: { error: "Confirmed Firefly transaction ID is required" } };
+    }
+    const matched = await matchReviewed(id, String(fireflySourceAccountId ?? ""));
+    if (matched.status !== 200) return matched;
+    const suggestion = matched.result;
+    if (suggestion.status !== "PROPOSED_MATCH" || suggestion.fireflyTransactionId !== fireflyTransactionId) {
+      return { status: 409, result: { error: "Confirmed payment does not equal the current unique suggestion: re-check before linking", suggestion } };
+    }
+    const saved = getState(dataDir, id);
+    setState(dataDir, id, {
+      ...saved,
+      confirmedFireflyTransactionId: fireflyTransactionId,
+      confirmedAt: new Date().toISOString()
+    });
+    return { status: 200, result: { status: "MATCH_CONFIRMED", fireflyTransactionId } };
   }
 
   const server = createServer(async (request, response) => {
@@ -174,6 +236,8 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           return state && {
             paperlessId: id, status: state.status, modified: state.modified,
             problems: state.problems ?? [], receiptId: state.receiptId ?? null,
+            draftRevision: state.draftRevision ?? null,
+            confirmedFireflyTransactionId: state.confirmedFireflyTransactionId ?? null,
             merchant: state.draft?.merchant ?? null,
             date: state.draft?.date ?? null,
             total: state.draft?.total ?? null
@@ -181,7 +245,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         }).filter(Boolean);
         return safeJson(response, 200, { drafts, limit: 100 });
       }
-      const match = /^\/drafts\/([1-9][0-9]*)(?:\/(import|match))?$/.exec(path);
+      const match = /^\/drafts\/([1-9][0-9]*)(?:\/(import|match|confirm-match))?$/.exec(path);
       if (!match) return safeJson(response, 404, { error: "Not found" });
       const id = Number(match[1]);
       if (!Number.isSafeInteger(id) || id > 2147483647) return safeJson(response, 400, { error: "Invalid document ID" });
@@ -192,13 +256,26 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (request.method === "PUT" && !match[2]) {
         const previous = getState(dataDir, id);
         if (!previous?.contentHash || previous.receiptId) return safeJson(response, 409, { error: "No editable pending draft" });
+        if (active.has(id)) return safeJson(response, 409, { error: "Processing still active: retry shortly" });
         const edited = await jsonBody(request, 100000);
+        const draftRevision = (previous.draftRevision ?? 0) + 1;
         // Still checked against immutable OCR evidence at import time.
-        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [] });
-        return safeJson(response, 200, { status: "DRAFT_UPDATED" });
+        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [], reviewerEdited: true, draftRevision });
+        return safeJson(response, 200, { status: "DRAFT_UPDATED", draftRevision });
       }
       if (request.method === "POST" && match[2] === "import") {
-        const result = await importReviewed(id);
+        // Optional { expectedRevision }: when a reviewer client sends the revision it
+        // reviewed, a stale approval is rejected instead of importing a newer draft.
+        // Legacy callers (empty object) keep the OCR-revision guard only.
+        const importBody = await jsonBody(request, 1000);
+        let expectedRevision;
+        if (importBody?.expectedRevision !== undefined) {
+          if (!Number.isSafeInteger(importBody.expectedRevision) || importBody.expectedRevision < 1) {
+            return safeJson(response, 400, { error: "Expected draft revision must be a positive integer" });
+          }
+          expectedRevision = importBody.expectedRevision;
+        }
+        const result = await importReviewed(id, expectedRevision);
         return safeJson(response, result.status, result.result);
       }
       if (request.method === "POST" && match[2] === "match") {
@@ -206,18 +283,24 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         const result = await matchReviewed(id, String(body.fireflySourceAccountId ?? ""));
         return safeJson(response, result.status, result.result);
       }
+      if (request.method === "POST" && match[2] === "confirm-match") {
+        const body = await jsonBody(request, 1000);
+        const result = await confirmMatch(id, body?.fireflyTransactionId, body?.fireflySourceAccountId);
+        return safeJson(response, result.status, result.result);
+      }
       return safeJson(response, 405, { error: "Method not allowed" });
     } catch (error) {
       // No tokens, OCR, model output, or payment data in errors/logs.
       const reason = error instanceof Error ? error.message : "Unexpected error";
-      return safeJson(response, 422, { error: reason.slice(0, 160) });
+      const status = error instanceof Error && Number.isSafeInteger(error.statusCode) ? error.statusCode : 422;
+      return safeJson(response, status, { error: reason.slice(0, 160) });
     }
   });
 
   // Pending work is intentionally not auto-replayed after an unclean restart.
   // Paperless's native manual workflow and re-tagging can retrigger an ID safely.
   // Avoid claiming unattended durable recovery without a proper queue.
-  return { server, processDocument, importReviewed, matchReviewed, state: id => getState(dataDir, id) };
+  return { server, processDocument, importReviewed, matchReviewed, confirmMatch, state: id => getState(dataDir, id) };
 }
 
 function secret(name) {
