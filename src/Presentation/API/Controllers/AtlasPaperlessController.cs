@@ -54,7 +54,12 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
     public IActionResult Status()
     {
         Response.Headers.CacheControl = "no-store";
-        return Ok(new { configured = PrivateBridge() is not null });
+        string? paperlessUiUrl = configuration["AtlasBridge:PaperlessBrowserUrl"];
+        if (!Uri.TryCreate(paperlessUiUrl, UriKind.Absolute, out Uri? browse) ||
+            browse.Scheme != Uri.UriSchemeHttps || browse.UserInfo.Length > 0 ||
+            browse.Query.Length > 0 || browse.Fragment.Length > 0)
+            paperlessUiUrl = null;
+        return Ok(new { configured = PrivateBridge() is not null, paperlessBrowserUrl = paperlessUiUrl?.TrimEnd('/') });
     }
 
     [HttpGet("drafts")]
