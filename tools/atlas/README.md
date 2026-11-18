@@ -47,7 +47,7 @@ not the PDF. Paperless's original remains in its own archive.
 The bridge verifies the token, then reads:
 
     GET /api/documents/{id}/
-    Authorization: Token *** read-only API token>
+    Authorization: Token <Paperless read-only API token>
 
 It rejects documents without the expected tag, with configured blocked
 medical/sensitive tags, without latest OCR content, or with oversized text.
@@ -83,7 +83,7 @@ necessary but cannot prove that AI parsed a receipt perfectly.
 If the owner approves a draft, the adapter calls the existing Receipts API:
 
     POST /api/receipts/complete
-    X-API-Key: *** key scoped to this operator>
+    X-API-Key: <Receipts key scoped to this operator>
     {
       "clientRequestId": "<deterministic UUID from Paperless instance + document ID>",
       "receipt": { "location": "H-E-B", "date": "2026-11-18", "taxAmount": 0.61 },
