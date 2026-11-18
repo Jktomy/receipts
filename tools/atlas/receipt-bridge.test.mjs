@@ -221,6 +221,20 @@ test("Firefly match endpoint cannot mutate ledger and requires a reviewed source
   });
 });
 
+test("unexpected model fields cannot survive into persisted purchase drafts", async () => {
+  await exerciseBridge(async ({url, bridge}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    const state = await untilReady(bridge,44);
+    assert.equal(state.draft.accountNumber,undefined);
+    assert.equal(state.draft.cardNumber,undefined);
+    assert.equal(state.draft.items[0].cardNumber,undefined);
+    const edited = {...state.draft, cardNumber: "4111111111111111"};
+    const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(saved.status,200);
+    assert.equal(bridge.state(44).draft.cardNumber,undefined);
+  },{draft:{...good,accountNumber:"bank-secret", cardNumber:"4111111111111111",
+    items:[{...good.items[0],cardNumber:"secret"},good.items[1]]}});
+});
 test("explicit opt-in imports only high-quality evidence with no Firefly writes",async()=>{
   await exerciseBridge(async({url,bridge,calls})=>{
     const webhook=await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
