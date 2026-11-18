@@ -16,6 +16,7 @@ const ocr = [
 ].join("\n");
 const good = {
   merchant: "H-E-B", date: "2026-11-18", currency: "USD",
+  merchantEvidence: "H-E-B 11/18/2026", dateEvidence: "11/18/2026", totalEvidence: "TOTAL 8.60",
   total: "8.60", tax: "0.61", confidence: "high",
   items: [
     { description: "Milk", evidence: "MILK 1 3.99", quantity: "1", unitPrice: "3.99", total: "3.99" },
@@ -80,6 +81,8 @@ test("valid receipt with coupon balances exactly, using original OCR evidence", 
 test("bad OCR line, guessed product, wrong arithmetic, and low confidence are blocked", () => {
   assert.equal(qualifyItemization({...good,items:[{...good.items[0],evidence:"invented item"}]},ocr).ok,false);
   assert.equal(qualifyItemization({...good,total:"8.61"},ocr).ok,false);
+  assert.equal(qualifyItemization({...good,merchantEvidence:"UNKNOWN STORE"},ocr).ok,false);
+  assert.equal(qualifyItemization({...good,totalEvidence:"TOTAL 0.01"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,confidence:"low"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,items:[{...good.items[0],total:"3.98"}]},ocr).ok,false);
 });
