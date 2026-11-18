@@ -239,3 +239,19 @@ test("auto import never writes a low-confidence receipt",async()=>{
     assert.equal(calls.some(c=>c.host==="receipts.test"),false);
   },{overrides:{autoImport:true},draft:{...good,confidence:"low"}});
 });
+
+test("Paperless draft inbox lists only bounded authenticated source summaries", async () => {
+  await exerciseBridge(async ({url, bridge}) => {
+    const denied = await http(url+"/drafts","GET",null,"x-atlas-operator-key","wrong");
+    assert.equal(denied.status,401);
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const allowed = await http(url+"/drafts","GET",null,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(allowed.status,200);
+    const payload=await allowed.json();
+    assert.equal(payload.drafts.length,1);
+    assert.equal(payload.drafts[0].paperlessId,44);
+    assert.equal(payload.drafts[0].status,"READY_FOR_REVIEW");
+    assert.equal("content" in payload.drafts[0],false);
+  });
+});
