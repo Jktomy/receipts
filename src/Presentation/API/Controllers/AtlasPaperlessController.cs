@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,6 +12,7 @@ namespace API.Controllers;
 /// No webhook/operator credentials are ever exposed to browser JavaScript.
 /// Excluded from upstream OpenAPI schema; opt-in fork-specific feature.
 /// </summary>
+[ApiVersion("1.0")]
 [ApiController]
 [ApiExplorerSettings(IgnoreApi = true)]
 [Route("api/atlas/paperless")]
@@ -53,7 +55,15 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		{
 			return null;
 		}
-		string secret = System.IO.File.ReadAllText(secretPath).Trim();
+		string secret;
+		try
+		{
+			secret = System.IO.File.ReadAllText(secretPath).Trim();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return null;
+		}
 		return secret.Length >= 16 ? (url, secret) : null;
 	}
 
