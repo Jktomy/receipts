@@ -18,16 +18,16 @@ services:
             else
               tr -dc 'A-Za-z0-9+/' < /dev/urandom | head -c 48 > "/secrets/$${secret}"
             fi
-            echo "Generated /secrets/${secret}"
+            echo "Generated /secrets/$${secret}"
           else
             echo "/secrets/$${secret} already exists, skipping"
           fi
           # PostgreSQL must read its password as its own container user.
           # JWT and bootstrap admin passwords are read only by the root entrypoint.
-          if [ "${secret}" = "pg_password" ]; then
-            chmod 644 "/secrets/${secret}"
+          if [ "$${secret}" = "pg_password" ]; then
+            chmod 644 "/secrets/$${secret}"
           else
-            chmod 600 "/secrets/${secret}"
+            chmod 600 "/secrets/$${secret}"
           fi
         done
         echo "Secrets ready"
