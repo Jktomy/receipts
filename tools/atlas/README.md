@@ -139,8 +139,13 @@ follow-up source changes requiring migrations, tests and review.
 
 Paperless webhook uses X-Atlas-Hook-Key. Operator endpoints use
 X-Atlas-Operator-Key. These are separate high-entropy secrets.
-Do not expose the operator API on public ingress. The draft API is currently
-an operator integration point, **not yet a page inside the Receipts React UI**.
+Do not expose the operator API on public ingress. The draft API is also exposed through a **native Admin-only Receipts
+Paperless Inbox** at /admin/paperless-inbox on the current review branch.
+The React page uses the normal Receipts bearer-token session and a same-origin
+server-side proxy. Only the Receipts .NET API holds the operator secret file;
+the browser never receives it. Its review queue is bounded to 100 recent
+Paperless IDs. Optional Paperless source links use a separately configured
+HTTPS browser URL. This GUI is source-applied, NOT production deployed.
 
 ## Build and tests
 
@@ -177,10 +182,11 @@ separately built, tested and pinned fork image is deployed.
   totals, weighed products, webhook auth, reviewed create, opt-in create,
   duplicate request protection, source revision mismatch and Firefly GET-only
   candidate evaluation.
-- **NOT VERIFIED:** real Paperless webhook delivery to this new bridge,
-  live Open Lyric extraction accuracy, production container build, live
-  Receipts persistence and database restores, Firefly credential coverage,
-  native Receipts review UI and persistent Firefly source links.
+- **NOT VERIFIED:** real Paperless webhook delivery to this bridge,
+  live Open Lyric extraction accuracy, live Receipts database persistence and
+  restores, production credentials, native GUI end-to-end behavior, and
+  persistent Firefly source links. The separate Atlas Docker bridge smoke test
+  and full .NET/React suite must pass on the exact review branch before merge.
 - **No protected data** was read or stored during the implementation/testing.
 - Native Paperless and Midas workflows, current Receipt Wrangler and the
   production Receipts deployment remain unchanged.
