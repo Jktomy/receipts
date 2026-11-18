@@ -49,7 +49,7 @@ docker compose ps
 curl http://localhost:8080/api/health
 ```
 
-The app will be available at `http://<your-host-ip>:8080`.
+In this Atlas fork the default private binding is `http://127.0.0.1:8080` on the Docker host. For access through an approved cross-host Tailscale proxy, bind explicitly to the appropriate private interface, not all host interfaces. See [Atlas integration](../tools/atlas/README.md).
 
 ## How It Works
 
@@ -152,20 +152,18 @@ docker compose exec app cat /secrets/jwt_key
 docker compose exec app cat /secrets/admin_password
 ```
 
-### Rotate secrets
+### Rotate secrets safely
 
-```bash
-# Stop the stack
-docker compose down
+**Do not delete the secrets volume on an installation with real data.** PostgreSQL
+retains its original password inside the existing database; regenerating the
+secret file alone can make the database inaccessible. The old example that
+removed the secrets volume is unsafe for an existing installation.
 
-# Remove the secrets volume (this deletes all secrets)
-docker volume rm receipts_secrets
-
-# Start again (new secrets are generated)
-docker compose up -d
-```
-
-> **Note:** Rotating `pg_password` also requires resetting the PostgreSQL data volume since the password is set on first database initialization.
+Rotate the administrator password through the application's authenticated
+password-change flow. Changes to PostgreSQL credentials or the JWT signing key
+require a separately reviewed, downtime-aware maintenance plan, compatible
+database and secret updates, a tested backup, and login/restart verification.
+Never log or paste secret values into issues or public documentation.
 
 ### Full reset (secrets + database)
 
@@ -312,13 +310,10 @@ If the app fails with "secrets not found", check that the init container ran suc
 docker compose logs init
 ```
 
-If the secrets volume is corrupted, remove it and restart:
-
-```bash
-docker compose down
-docker volume rm receipts_secrets
-docker compose up -d
-```
+If the secrets volume is missing or corrupted, **do not remove or
+regenerate it blindly**: restore the matching credentials from protected backup
+and verify compatibility with the existing database. Treat unknown credential
+state as a recovery blocker, not a reason to reset a live data volume.
 
 ### Database connection errors
 
@@ -326,7 +321,7 @@ Ensure `POSTGRES_USER` matches between the `app` and `db` services in `docker-co
 
 ### Port already in use
 
-Change the host port mapping in `docker-compose.yml` under `app.ports` (e.g., `"8081:8080"`).
+Set `RECEIPTS_HOST_PORT` to another port; keep `RECEIPTS_BIND_HOST` restricted to the required private interface.
 
 ### Out of memory
 
@@ -349,7 +344,7 @@ Ensure **Websockets Support** is enabled in your NPM proxy host configuration. S
 - `no-new-privileges` security option prevents privilege escalation
 - Secrets are auto-generated and stored in a Docker volume (never in files on disk or environment)
 - Database is only accessible on the **internal Docker network** (not exposed to host)
-- Docker images are scanned for vulnerabilities with **Trivy** in CI
+- The release workflow scans images with **Trivy**, but its current configuration is not a substitute for a blocking vulnerability gate before an Atlas promotion
 - Log rotation configured (50MB max, 3 files)
 
 ### Firewall (recommended)
