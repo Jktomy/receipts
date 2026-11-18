@@ -269,3 +269,87 @@ test("Paperless draft inbox lists only bounded authenticated source summaries", 
     assert.equal("content" in payload.drafts[0],false);
   });
 });
+test("malformed request bodies fail with 400, not a generic 422", async () => {
+  await exerciseBridge(async ({url, bridge}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const raw = (path, body) => fetch(url+path, { method: "PUT", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body });
+    const badPut = await raw("/drafts/44", "{not json");
+    assert.equal(badPut.status, 400);
+    assert.match(await badPut.text(), /Malformed/);
+    const badHook = await fetch(url+"/hooks/paperless", { method: "POST", headers: { "Content-Type": "application/json", "x-atlas-hook-key": config.webhookSecret }, body: "{{{" });
+    assert.equal(badHook.status, 400);
+    const badImport = await fetch(url+"/drafts/44/import", { method: "POST", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body: "[oops" });
+    assert.equal(badImport.status, 400);
+    const badId = await http(url+"/hooks/paperless","POST",{sourceId:"nope"},"x-atlas-hook-key",config.webhookSecret);
+    assert.equal(badId.status, 400);
+  });
+});
+test("reviewed draft revision rejects stale approvals", async () => {
+  await exerciseBridge(async ({url, bridge, calls}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    assert.equal(bridge.state(44).draftRevision, 1);
+    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus" };
+    const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).draftRevision, 2);
+    const stale = await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(stale.status, 409);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 0);
+    const fresh = await http(url+"/drafts/44/import","POST",{expectedRevision:2},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(fresh.status, 200);
+    const replay = await http(url+"/drafts/44/import","POST",{expectedRevision:2},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json()).receiptId, "receipts-101");
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 1);
+  });
+});
+test("concurrent approvals cannot create duplicate purchases", async () => {
+  await exerciseBridge(async ({url, bridge, calls}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const rev = bridge.state(44).draftRevision;
+    const [first, second] = await Promise.all([bridge.importReviewed(44, rev), bridge.importReviewed(44, rev)]);
+    const ok = [first, second].filter(r => r.status === 200);
+    assert.equal(ok.length >= 1, true);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 1);
+    for (const r of ok) assert.equal(r.result.receiptId, "receipts-101");
+    assert.equal(bridge.state(44).receiptId, "receipts-101");
+  });
+});
+test("reviewer corrections survive OCR changes until re-review", async () => {
+  await exerciseBridge(async ({url, bridge, calls, setDocument}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus" };
+    await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
+    await bridge.processDocument(44);
+    const kept = bridge.state(44);
+    assert.equal(kept.status, "SOURCE_CHANGED_REVIEW");
+    assert.equal(kept.draft.merchant, "H-E-B Plus");
+    assert.equal(kept.draftRevision, 2);
+    const blocked = await http(url+"/drafts/44/import","POST",{expectedRevision:2},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(blocked.status, 409);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 0);
+  });
+});
+test("confirmed payment links store durably without touching the ledger", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, calls}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const missing = await http(url+"/drafts/44/confirm-match","POST",{fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(missing.status, 400);
+    const wrong = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"32",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(wrong.status, 409);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    assert.equal((await confirmed.json()).status, "MATCH_CONFIRMED");
+    const stored = await http(url+"/drafts/44","GET",null,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal((await stored.json()).confirmedFireflyTransactionId, "31");
+    assert.equal(calls.some(c=>c.host==="firefly.test"&&c.method!=="GET"), false);
+    assert.equal(calls.some(c=>c.host==="receipts.test"), false);
+  }, { fireflyPages: pages });
+});
