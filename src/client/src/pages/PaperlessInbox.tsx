@@ -31,6 +31,8 @@ type DraftSummary = {
   modified?: string;
   problems: string[];
   receiptId?: string | null;
+  draftRevision?: number | null;
+  confirmedFireflyTransactionId?: string | null;
   merchant?: string | null;
   date?: string | null;
   total?: string | null;
@@ -66,6 +68,12 @@ async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET"
   return data as T;
 }
 
+function matchLabel(match: MatchResult): string {
+  // A receipt without a Firefly payment is valid: neutral wording, never an error.
+  if (match.status === "UNMATCHED") return "No payment linked";
+  return match.status.replaceAll("_", " ");
+}
+
 function Field({ label, value, onChange }: {
   label: string; value?: string; onChange: (value: string) => void;
 }) {
@@ -76,6 +84,9 @@ function Field({ label, value, onChange }: {
     </label>
   );
 }
+
+const blankItem: AtlasItem = { description: "", quantity: "1", unitPrice: "", total: "", evidence: "", sku: "" };
+const blankAdjustment: AtlasAdjustment = { type: "", amount: "", description: "" };
 
 export default function PaperlessInbox() {
   usePageTitle("Paperless Review");
@@ -130,6 +141,28 @@ export default function PaperlessInbox() {
     items[index] = { ...items[index], [key]: value };
     edit({ items });
   }
+  function addItem() {
+    if (!draft) return;
+    edit({ items: [...(draft.items ?? []), { ...blankItem }] });
+  }
+  function removeItem(index: number) {
+    if (!draft) return;
+    edit({ items: (draft.items ?? []).filter((_, i) => i !== index) });
+  }
+  function editAdjustment(index: number, key: keyof AtlasAdjustment, value: string) {
+    if (!draft) return;
+    const adjustments = [...(draft.adjustments ?? [])];
+    adjustments[index] = { ...adjustments[index], [key]: value };
+    edit({ adjustments });
+  }
+  function addAdjustment() {
+    if (!draft) return;
+    edit({ adjustments: [...(draft.adjustments ?? []), { ...blankAdjustment }] });
+  }
+  function removeAdjustment(index: number) {
+    if (!draft) return;
+    edit({ adjustments: (draft.adjustments ?? []).filter((_, i) => i !== index) });
+  }
   async function save() {
     if (!selected || !draft) return;
     setBusy(true); setError(undefined);
@@ -147,7 +180,8 @@ export default function PaperlessInbox() {
     if (!window.confirm("Import these reviewed line items into Receipts? This does NOT change Firefly.")) return;
     setBusy(true); setError(undefined);
     try {
-      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST");
+      // Send the reviewed revision so a stale approval is rejected, not imported.
+      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision ?? undefined });
       setMessage("Imported to Receipts. Firefly remains unchanged.");
       await refresh();
       const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
@@ -164,6 +198,24 @@ export default function PaperlessInbox() {
         "POST", { fireflySourceAccountId: sourceAccountId.trim() },
       ));
     } catch (e) { setError(e instanceof Error ? e.message : "Unable to check payment"); }
+    finally { setBusy(false); }
+  }
+  async function confirmLink() {
+    if (!selected || dirty || !match || match.status !== "PROPOSED_MATCH" || !match.fireflyTransactionId || !sourceAccountId.trim()) return;
+    if (!window.confirm(`Link this receipt to Firefly transaction #${match.fireflyTransactionId}? No Firefly data will be changed.`)) return;
+    setBusy(true); setError(undefined);
+    try {
+      const result = await atlasApi<{ status: string }>(
+        `/api/atlas/paperless/drafts/${selected.paperlessId}/confirm-match`,
+        "POST", { fireflyTransactionId: match.fireflyTransactionId, fireflySourceAccountId: sourceAccountId.trim() },
+      );
+      setMessage(result.status === "MATCH_CONFIRMED"
+        ? `Payment link confirmed to Firefly transaction #${match.fireflyTransactionId}. Firefly remains unchanged.`
+        : "Payment link recorded.");
+      const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
+      setSelected(state);
+      await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "Unable to confirm link"); }
     finally { setBusy(false); }
   }
   return (
@@ -218,9 +270,12 @@ export default function PaperlessInbox() {
                       Open original in Paperless
                     </a>
                   )}
-                  <p className="text-xs text-muted-foreground">Status: {selected.status} · Originals remain in Paperless</p>
+                  <p className="text-xs text-muted-foreground">Status: {selected.status} · Draft revision {selected.draftRevision ?? "—"} · Originals remain in Paperless</p>
                   {selected.receiptId && (
                     <Link to={`/receipts/${selected.receiptId}`} className="text-sm underline">Open imported receipt</Link>
+                  )}
+                  {selected.confirmedFireflyTransactionId && (
+                    <p className="text-xs text-muted-foreground">Confirmed payment: Firefly transaction #{selected.confirmedFireflyTransactionId}</p>
                   )}
                 </div>
                 {selected.problems?.length > 0 && (
@@ -241,7 +296,7 @@ export default function PaperlessInbox() {
                 <div className="overflow-x-auto">
                   <h3 className="mb-2 font-medium">Purchased items</h3>
                   <table className="w-full text-sm">
-                    <thead><tr><th className="text-left">Product</th><th>Quantity</th><th>Unit price</th><th>Line total</th></tr></thead>
+                    <thead><tr><th className="text-left">Product</th><th>Quantity</th><th>Unit price</th><th>Line total</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>
                       {(draft.items ?? []).map((item, index) => (
                         <tr key={index}>
@@ -255,17 +310,25 @@ export default function PaperlessInbox() {
                               />
                             </td>
                           ))}
+                          <td className="p-1">
+                            <button type="button" className="btn xs ghost" aria-label={`Remove item ${index + 1}`} onClick={() => removeItem(index)}>Remove</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <button type="button" className="btn xs mt-2" onClick={addItem}>Add item</button>
                 </div>
                 <h3 className="font-medium">Adjustments</h3>
                 {(draft.adjustments ?? []).map((adjustment, index) => (
-                  <p key={index} className="text-sm">
-                    {adjustment.type || "Adjustment"}: {adjustment.amount ?? "—"} · {adjustment.description}
-                  </p>
+                  <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
+                    <Field label={`Adjustment ${index + 1} type`} value={adjustment.type} onChange={type => editAdjustment(index, "type", type)} />
+                    <Field label={`Adjustment ${index + 1} amount`} value={adjustment.amount} onChange={amount => editAdjustment(index, "amount", amount)} />
+                    <Field label={`Adjustment ${index + 1} note`} value={adjustment.description} onChange={description => editAdjustment(index, "description", description)} />
+                    <button type="button" className="btn xs ghost" aria-label={`Remove adjustment ${index + 1}`} onClick={() => removeAdjustment(index)}>Remove</button>
+                  </div>
                 ))}
+                <button type="button" className="btn xs" onClick={addAdjustment}>Add adjustment</button>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn" disabled={busy || !dirty} onClick={() => void save()}>Save corrections</button>
                   <button
@@ -287,10 +350,13 @@ export default function PaperlessInbox() {
                   </div>
                   {match && (
                     <p role="status" className="mt-2 text-sm">
-                      {match.status.replaceAll("_", " ")}
+                      {matchLabel(match)}
                       {match.fireflyTransactionId ? ` · Firefly transaction #${match.fireflyTransactionId}` : ""}
                       {match.reason ? ` · ${match.reason}` : ""}
                     </p>
+                  )}
+                  {match?.status === "PROPOSED_MATCH" && match.fireflyTransactionId && (
+                    <button type="button" className="btn mt-2" disabled={busy || dirty} onClick={() => void confirmLink()}>Confirm payment link</button>
                   )}
                 </div>
               </div>
