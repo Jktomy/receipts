@@ -54,6 +54,7 @@ public class ReceiptItemEntityConfiguration : IEntityTypeConfiguration<ReceiptIt
 		builder.HasIndex(e => e.NormalizedDescriptionId);
 
 		builder.Property(e => e.EnvelopeSource).HasConversion<string>().HasMaxLength(16);
+		builder.Property(e => e.UnitOfMeasure).HasMaxLength(16);
 		builder.HasOne<Entities.Envelopes.EnvelopeEntity>().WithMany().HasForeignKey(e => e.EnvelopeId).OnDelete(DeleteBehavior.Restrict);
 		builder.HasOne<Entities.Envelopes.OccasionEntity>().WithMany().HasForeignKey(e => e.OccasionId).OnDelete(DeleteBehavior.Restrict);
 		builder.HasIndex(e => e.EnvelopeId);
