@@ -17,7 +17,8 @@ public record PurchaseSearchItem(
 	string UnitPriceCurrency,
 	decimal TotalAmount,
 	string TotalAmountCurrency,
-		string NormalizationReviewState = "needsReview")
+		string NormalizationReviewState = "needsReview",
+	string? UnitOfMeasure = null)
 {
 	public Guid? PathRevisionId { get; init; }
 	public Guid? CategoryId { get; init; }
