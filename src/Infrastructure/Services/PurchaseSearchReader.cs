@@ -195,7 +195,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 	// Keeping this as a composable relation lets PostgreSQL filter before count and paging.
 	internal static IQueryable<TaxonomyNodeEntity> EligibleCategoryNodes(
 			ApplicationDbContext context, Guid categoryId, Guid? revisionId)
-		=> context.TaxonomyNodes.FromSqlInterpolated($"""
+			=> context.TaxonomyNodes.FromSqlInterpolated($"""
                         WITH RECURSIVE ancestors AS (
                             SELECT n."RevisionId", n."CategoryId", n."ParentId",
                                    ARRAY[n."CategoryId"] AS path
