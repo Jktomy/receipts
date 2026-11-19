@@ -274,4 +274,125 @@ it("explains empty search without presenting results", async () => {
   expect(
     screen.getByPlaceholderText("Search item names, codes, or stores"),
   ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("table", { name: "Purchase results" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows loading and retryable failures", async () => {
+  search.mockReturnValue(mockQueryResult());
+  const view = renderPage();
+  expect(screen.getByText("Searching purchases…")).toHaveTextContent(
+    "Searching purchases",
+  );
+  const retry = vi.fn();
+  search.mockReturnValue(
+    mockQueryResult({ isPending: false, isError: true, refetch: retry }),
+  );
+  view.rerender(
+    <>
+      <PurchaseSearch />
+      <Location />
+    </>,
+  );
+  expect(
+    screen.getByText("Purchase history could not be loaded."),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+  expect(retry).toHaveBeenCalledOnce();
+});
+
+it("distinguishes a stale empty page from no matching purchases", async () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [],
+        total: 1,
+        offset: 25,
+        limit: 25,
+      },
+    }),
+  );
+  renderPage("/search?q=milk&offset=25");
+  expect(screen.getByText(/No purchases on this page/)).toBeInTheDocument();
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [],
+        total: 0,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "First page" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=milk$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+  expect(
+    screen.getByText(/No purchases match these filters/),
+  ).toBeInTheDocument();
+});
+
+it.each([
+  ["   ", "Enter at least 2 characters."],
+  ["x".repeat(201), "Use at most 200 characters."],
+])(
+  "rejects invalid submitted phrase without replacing the current results",
+  async (draft, message) => {
+    renderPage("/search?q=milk&offset=25");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Search purchases" }),
+      { target: { value: draft } },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      "?q=milk&offset=25",
+    );
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      25,
+      25,
+      true,
+      expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+    );
+  },
+);
+it("restores submitted query and page with browser Back, discarding the other search draft", async () => {
+  renderPage("/search?q=milk&offset=25");
+  fireEvent.change(screen.getByRole("textbox", { name: "Search purchases" }), {
+    target: { value: "hot dogs" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=hot\+dogs$/,
+    ),
+  );
+  expect(screen.getByRole("textbox", { name: "Search purchases" })).toHaveValue(
+    "milk",
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    25,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
 });
