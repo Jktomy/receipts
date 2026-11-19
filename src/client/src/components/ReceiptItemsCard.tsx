@@ -249,7 +249,7 @@ export function ReceiptItemsCard({
                 value={occasionId}
                 disabled={choicesBusy}
                 onChange={(next) =>
-                  setItemChoices.mutate({
+                  setReceiptChoices.mutate({
                     receiptId,
                     paidFromEnvelopeId,
                     occasionId: next,
@@ -338,7 +338,7 @@ export function ReceiptItemsCard({
                             ? "Verified"
                             : item.normalizationReviewState === "excluded"
                               ? "Excluded"
-                              : null}
+                              : "Needs review"}
                         </div>
                         {item.normalizedDescriptionName &&
                           item.normalizedDescriptionName !==
