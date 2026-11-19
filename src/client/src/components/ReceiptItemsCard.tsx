@@ -338,7 +338,7 @@ export function ReceiptItemsCard({
                             ? "Verified"
                             : item.normalizationReviewState === "excluded"
                               ? "Excluded"
-                              : "Needs review"}
+                              : null}
                         </div>
                         {item.normalizedDescriptionName &&
                           item.normalizedDescriptionName !==
