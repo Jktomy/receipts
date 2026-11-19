@@ -9,6 +9,7 @@ public class UpdateReceiptItemRequestValidator : AbstractValidator<UpdateReceipt
 	public const string IdMustNotBeEmpty = "ID must not be empty.";
 	public const string DescriptionMustNotBeEmpty = "Description must not be empty.";
 	public const string QuantityMustBePositive = "Quantity must be positive.";
+	public const string UnitOfMeasureNotInCatalog = "Unit of measure is not a known unit.";
 
 	public UpdateReceiptItemRequestValidator()
 	{
@@ -27,5 +28,9 @@ public class UpdateReceiptItemRequestValidator : AbstractValidator<UpdateReceipt
 		RuleFor(x => x.Quantity)
 			.GreaterThan(0)
 			.WithMessage(QuantityMustBePositive);
+
+		RuleFor(x => x.UnitOfMeasure)
+			.Must(unit => unit is null || Domain.Core.UnitCatalog.IsKnown(unit))
+			.WithMessage(UnitOfMeasureNotInCatalog);
 	}
 }
