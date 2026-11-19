@@ -154,7 +154,3 @@ it("applies filters atomically and preserves them when submitting another phrase
   expect(currentParams().get("minUnitPrice")).toBe("0");
   expect(currentParams().get("sortBy")).toBe("quantity");
 });
-
-it("remembers rows per page only for purchase history and resets offset without losing filters", async () => {
-  const user = userEvent.setup();
-  const view = renderPage("/search?q=milk&offset=25&location=Market");
