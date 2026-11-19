@@ -188,9 +188,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     if (!saved?.draft || !saved?.contentHash) return { status: 404, result: { error: "Draft not found" } };
     const current = await getPaperlessText(fetcher, config, id);
     if (current.contentHash !== saved.contentHash) {
-      // The checked source is gone: block the match and void any payment
-      // confirmation checked against the old revision.
-      setState(dataDir, id, { ...saved, confirmedFireflyTransactionId: null, confirmedAt: null });
+      // The checked source is gone: block the match, mark the draft stale for
+      // re-review, and void any payment confirmation checked against the old revision.
+      setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR source revision changed: re-check before matching", confirmedFireflyTransactionId: null, confirmedAt: null });
       return { status: 409, result: { error: "OCR source revision changed" } };
     }
     const qualified = qualifyItemization(saved.draft, current.content);
@@ -211,16 +211,26 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     if (typeof fireflyTransactionId !== "string" || fireflyTransactionId.length < 1 || fireflyTransactionId.length > 80) {
       return { status: 400, result: { error: "Confirmed Firefly transaction ID is required" } };
     }
+    // Snapshot before the async Firefly work: a reviewer save or OCR change that
+    // lands mid-flight must not be confirmed against (race guard, checked below).
+    const before = getState(dataDir, id);
+    const beforeRevision = before?.draftRevision ?? null;
+    const beforeHash = before?.contentHash ?? null;
     const matched = await matchReviewed(id, String(fireflySourceAccountId ?? ""));
     if (matched.status !== 200) return matched;
     const suggestion = matched.result;
     if (suggestion.status !== "PROPOSED_MATCH" || suggestion.fireflyTransactionId !== fireflyTransactionId) {
       return { status: 409, result: { error: "Confirmed payment does not equal the current unique suggestion: re-check before linking", suggestion } };
     }
+    // Re-read AFTER Firefly responded: if the revision or source changed while
+    // checking, the suggestion describes a stale draft - conflict, never link.
+    // No awaits between this re-read and setState below, so the store is atomic.
+    const saved = getState(dataDir, id);
+    if ((saved?.draftRevision ?? null) !== beforeRevision || (saved?.contentHash ?? null) !== beforeHash) {
+      return { status: 409, result: { error: "Receipt changed while checking the payment: re-check before linking" } };
+    }
     // Replay of the same confirmation is idempotent. A different receipt
     // claiming the same payment is rejected: one-to-one, globally enforced.
-    // No awaits between this check and setState below, so it is atomic.
-    const saved = getState(dataDir, id);
     if (saved?.confirmedFireflyTransactionId === fireflyTransactionId) {
       return { status: 200, result: { status: "MATCH_CONFIRMED", fireflyTransactionId } };
     }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -540,5 +540,48 @@ test("blocked payment match voids the stale stored link", async () => {
     const blocked = await http(url+"/drafts/44/match","POST",{fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
     assert.equal(blocked.status, 409);
     assert.equal(bridge.state(44).confirmedFireflyTransactionId, null);
+    assert.equal(bridge.state(44).status, "SOURCE_CHANGED_REVIEW");
   }, { fireflyPages: pages });
+});
+test("edit landing while Firefly responds blocks the stale confirmation", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  const dir = mkdtempSync(join(tmpdir(), "atlas-bridge-race-"));
+  try {
+    const m = mock({ fireflyPages: pages });
+    let hookArmed = true;
+    const fetcher = async (target, options = {}) => {
+      const url = new URL(target);
+      if (url.host === "firefly.test" && hookArmed) {
+        hookArmed = false;
+        // A reviewer save landing while Firefly responds: bump the revision
+        // at the state level, exactly as PUT would (merchant corrected).
+        const f = join(dir, "paperless-44.json");
+        const state = JSON.parse(readFileSync(f, "utf8"));
+        state.draft = { ...state.draft, merchant: "OTHER MART" };
+        state.draftRevision = (state.draftRevision ?? 0) + 1;
+        state.reviewerEdited = true;
+        state.confirmedFireflyTransactionId = null;
+        state.confirmedAt = null;
+        writeFileSync(f, JSON.stringify(state, null, 2));
+      }
+      return m.fetcher(target, options);
+    };
+    const bridge = createAtlasBridge({ ...config }, { fetcher, dataDir: dir });
+    await new Promise(resolve => bridge.server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + bridge.server.address().port;
+    try {
+      await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+      await untilReady(bridge,44);
+      assert.equal(bridge.state(44).draftRevision, 1);
+      const out = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+      assert.equal(out.status, 409);
+      assert.match(await out.text(), /changed while checking/);
+      assert.equal(bridge.state(44).draftRevision, 2);
+      assert.equal(bridge.state(44).confirmedFireflyTransactionId, null);
+    } finally {
+      await new Promise(resolve => bridge.server.close(resolve));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

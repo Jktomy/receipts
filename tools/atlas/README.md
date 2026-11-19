@@ -167,7 +167,11 @@ follow-up source change requiring review.
   otherwise. A payment already confirmed on a different receipt is rejected
   with 409 (global one-to-one: checked across all drafts, atomically, so two
   receipts can never claim the same payment); replaying the same receipt's own
-  confirmation stays idempotent 200. Never writes to Firefly.
+  confirmation stays idempotent 200. The draft revision and source hash are
+  snapshotted before the Firefly check and re-verified after it responds: a
+  reviewer save or OCR change landing mid-flight returns 409 instead of
+  confirming a stale draft (no write occurs between re-read and store, so the
+  final step is atomic). Never writes to Firefly.
   The confirmed association lives in bridge-side state (durable JSON) and is
   carried into Receipts alongside the new sourcePaperlessDocumentId as soon as
   the import runs — it is not yet a native Receipts field. Native migration
