@@ -10,6 +10,7 @@ type AtlasItem = {
   sku?: string;
   evidence?: string;
   quantity?: string;
+  unit?: string;
   unitPrice?: string;
   total?: string;
 };
@@ -85,7 +86,7 @@ function Field({ label, value, onChange }: {
   );
 }
 
-const blankItem: AtlasItem = { description: "", quantity: "1", unitPrice: "", total: "", evidence: "", sku: "" };
+const blankItem: AtlasItem = { description: "", quantity: "1", unit: "", unitPrice: "", total: "", evidence: "", sku: "" };
 const blankAdjustment: AtlasAdjustment = { type: "", amount: "", description: "" };
 
 export default function PaperlessInbox() {
@@ -266,7 +267,7 @@ export default function PaperlessInbox() {
                 <div>
                   <h2 className="font-semibold">Paperless document #{selected.paperlessId}</h2>
                   {paperlessBrowserUrl && (
-                    <a href={`${paperlessBrowserUrl}/documents/${selected.paperlessId}/details`} target="_blank" rel="noopener noreferrer" className="text-sm underline">
+                    <a className="text-sm underline" href={`${paperlessBrowserUrl}/#/documents/${selected.paperlessId}`} target="_blank" rel="noreferrer">
                       Open original in Paperless
                     </a>
                   )}
@@ -296,11 +297,11 @@ export default function PaperlessInbox() {
                 <div className="overflow-x-auto">
                   <h3 className="mb-2 font-medium">Purchased items</h3>
                   <table className="w-full text-sm">
-                    <thead><tr><th className="text-left">Product</th><th>Quantity</th><th>Unit price</th><th>Line total</th><th><span className="sr-only">Actions</span></th></tr></thead>
+                    <thead><tr><th className="text-left">Product</th><th>Quantity</th><th>Unit</th><th>Unit price</th><th>Line total</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>
                       {(draft.items ?? []).map((item, index) => (
                         <tr key={index}>
-                          {(["description", "quantity", "unitPrice", "total"] as const).map(key => (
+                          {(["description", "quantity", "unit", "unitPrice", "total"] as const).map(key => (
                             <td key={key} className="p-1">
                               <input
                                 aria-label={`Item ${index + 1} ${key}`}
