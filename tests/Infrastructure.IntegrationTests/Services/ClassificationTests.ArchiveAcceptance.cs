@@ -35,10 +35,13 @@ public sealed partial class ClassificationTests
 	// envelope migration (dropping them) before the protected migration's guard refuses.
 	private static async Task<string> AcceptanceDatabaseFacts(ApplicationDbContext db)
 	{
+		// R03 product-intelligence columns (UnitOfMeasure, SourcePaperlessDocumentId) are excluded:
+		// the downgrade boundary under test unapplies later migrations (dropping those columns),
+		// while the facts snapshot verifies data preservation, not schema. Precedent: envelope columns above.
 		return await db.Database.SqlQueryRaw<string>("""
             SELECT coalesce(jsonb_agg(fact ORDER BY fact)::text, '[]') AS "Value" FROM (
-              SELECT 'items:' || (to_jsonb(t) - 'EnvelopeId' - 'EnvelopeSource' - 'OccasionId')::text AS fact FROM receipts."ReceiptItems" t
-              UNION ALL SELECT 'receipts:' || (to_jsonb(t) - 'PaidFromEnvelopeId' - 'OccasionId')::text FROM receipts."Receipts" t
+              SELECT 'items:' || (to_jsonb(t) - 'EnvelopeId' - 'EnvelopeSource' - 'OccasionId' - 'UnitOfMeasure')::text AS fact FROM receipts."ReceiptItems" t
+              UNION ALL SELECT 'receipts:' || (to_jsonb(t) - 'PaidFromEnvelopeId' - 'OccasionId' - 'SourcePaperlessDocumentId')::text FROM receipts."Receipts" t
               UNION ALL SELECT 'assignments:' || to_jsonb(t)::text FROM taxonomy."Assignments" t
               UNION ALL SELECT 'pointers:' || to_jsonb(t)::text FROM taxonomy."CurrentAssignments" t
               UNION ALL SELECT 'operations:' || to_jsonb(t)::text FROM taxonomy."HistoricalOperations" t
