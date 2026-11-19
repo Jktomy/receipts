@@ -114,3 +114,158 @@ it("sorts on the server and resets offset while preserving filters and unrelated
     expect.objectContaining({ sortBy: "unitPrice", sortDirection: "desc" }),
   );
 });
+
+it("applies filters atomically and preserves them when submitting another phrase", async () => {
+  renderPage("/search?q=milk&offset=50&sortBy=quantity&sortDirection=asc");
+  const calls = search.mock.calls.length;
+  fireEvent.change(screen.getByLabelText("Store contains"), {
+    target: { value: "  New store  " },
+  });
+  fireEvent.change(screen.getByLabelText("Minimum unit price"), {
+    target: { value: "0" },
+  });
+  expect(search).toHaveBeenCalledTimes(calls);
+  await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      0,
+      25,
+      true,
+      expect.objectContaining({
+        location: "New store",
+        minUnitPrice: 0,
+        sortBy: "quantity",
+        sortDirection: "asc",
+      }),
+    ),
+  );
+  await waitFor(() => {
+    expect(currentParams().get("location")).toBe("New store");
+    expect(currentParams().get("minUnitPrice")).toBe("0");
+    expect(currentParams().get("offset")).toBeNull();
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search purchases" }), {
+    target: { value: "hot dogs" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(currentParams().get("q")).toBe("hot dogs"));
+  expect(currentParams().get("location")).toBe("New store");
+  expect(currentParams().get("minUnitPrice")).toBe("0");
+  expect(currentParams().get("sortBy")).toBe("quantity");
+});
+
+it("remembers rows per page only for purchase history and resets offset without losing filters", async () => {
+  const user = userEvent.setup();
+  const view = renderPage("/search?q=milk&offset=25&location=Market");
+  screen.getByRole("combobox", { name: "Rows per page" }).focus();
+  await user.keyboard("{Enter}{End}{Enter}");
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      0,
+      100,
+      true,
+      expect.objectContaining({ location: "Market" }),
+    ),
+  );
+  expect(currentParams().get("limit")).toBe("100");
+  expect(localStorage.getItem("table-page-size:purchase-history")).toBe("100");
+  expect(localStorage.getItem("table-page-size:receipts")).toBeNull();
+  view.unmount();
+  renderPage("/search?q=milk");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    100,
+    true,
+    expect.objectContaining({ sortBy: "date" }),
+  );
+});
+
+it.each([
+  "startDate=2025-02-30",
+  "minUnitPrice=-1",
+  "startDate=2025-02-02&endDate=2025-02-01",
+])("rejects invalid linked filters without searching: %s", (filter) => {
+  renderPage(`/search?q=milk&${filter}`);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Some filters are invalid",
+  );
+  expect(search.mock.calls.at(-1)?.[3]).toBe(false);
+  expect(
+    screen.queryByRole("table", { name: "Purchase results" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows historical purchase evidence with precision and a receipt link", () => {
+  renderPage();
+  expect(
+    screen.getByRole("heading", { name: "Purchase history" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("table", { name: "Purchase results" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Old store/)).toBeInTheDocument();
+  expect(screen.getByText(/USD\s1\.2345/)).toBeInTheDocument();
+  expect(screen.getByText(/USD\s2\.47/)).toBeInTheDocument();
+  expect(screen.getByText("Code: MILK-42")).toBeInTheDocument();
+  expect(screen.getByText(/Verified product\s*:\s*Milk/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View receipt" })).toHaveAttribute(
+    "href",
+    "/receipts/receipt-1",
+  );
+});
+
+it("paginates through URL state and resets the page when a new phrase is submitted", async () => {
+  const user = userEvent.setup();
+  renderPage();
+  expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Next page" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=milk&offset=25$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    25,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+  await user.clear(screen.getByRole("textbox", { name: "Search purchases" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "Search purchases" }),
+    "  bread  ",
+  );
+  await user.click(screen.getByRole("button", { name: "Search" }));
+  // The async resolver and router transition may render before the URL commits.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=bread$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "bread",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+});
+
+it.each(["-1", "nope", "2147483648", "9007199254740993"])(
+  "rejects invalid URL offset %s",
+  (offset) => {
+    renderPage(`/search?q=milk&offset=${offset}`);
+    expect(search).toHaveBeenCalledWith(
+      "milk",
+      0,
+      25,
+      true,
+      expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+    );
+  },
+);
+PART2_CONTINUES_HERE
