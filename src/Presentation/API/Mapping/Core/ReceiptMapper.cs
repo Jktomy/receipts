@@ -1,39 +1,28 @@
-using API.Generated.Dtos;
-using Common;
-using Domain;
+using Application.Receipts;
 using Domain.Core;
+using Presentation.API.Contracts.Receipts;
 using Riok.Mapperly.Abstractions;
 
-namespace API.Mapping.Core;
+namespace Presentation.API.Mapping.Core;
 
 [Mapper]
-public partial class ReceiptMapper
+public static partial class ReceiptMapper
 {
-	[MapProperty(nameof(Receipt.TaxAmount.Amount), nameof(ReceiptResponse.TaxAmount))]
-	[MapperIgnoreTarget(nameof(ReceiptResponse.AdditionalProperties))]
-	public partial ReceiptResponse ToResponse(Receipt source);
+	[MapperIgnoreTarget(nameof(Receipt.PaidFromEnvelopeId))]
+	[MapperIgnoreTarget(nameof(Receipt.OccasionId))]
+	[MapperIgnoreTarget(nameof(Receipt.SourcePaperlessDocumentId))]
+	private static partial Receipt ToDomainPartial(CreateReceiptRequest request);
 
-	public Receipt ToDomain(CreateReceiptRequest source)
+	public static Receipt ToDomain(CreateReceiptRequest request)
 	{
-		return new Receipt(
-			Guid.Empty,
-			source.Location,
-			source.Date,
-			new Money((decimal)source.TaxAmount, Currency.USD)
-		)
-		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId, SourcePaperlessDocumentId = source.SourcePaperlessDocumentId };
+		Receipt receipt = ToDomainPartial(request);
+		if (request.SourcePaperlessDocumentId.HasValue)
+		{
+			receipt.SetSourcePaperlessDocument(request.SourcePaperlessDocumentId.Value);
+		}
+
+		return receipt;
 	}
 
-	public Receipt ToDomain(UpdateReceiptRequest source)
-	{
-		return new Receipt(
-			source.Id,
-			source.Location,
-			source.Date,
-			new Money((decimal)source.TaxAmount, Currency.USD)
-		)
-		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId };
-	}
-
-	private double MapDecimalToDouble(decimal value) => (double)value;
+	public static partial ReceiptResponse ToResponse(Receipt receipt);
 }

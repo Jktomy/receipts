@@ -1,98 +1,61 @@
-using API.Generated.Dtos;
-using Common;
-using Domain;
+using Application.Receipts;
 using Domain.Core;
+using Presentation.API.Contracts.Common;
+using Presentation.API.Contracts.Receipts;
 using Riok.Mapperly.Abstractions;
 
-namespace API.Mapping.Core;
+namespace Presentation.API.Mapping.Core;
 
 [Mapper]
-public partial class ReceiptItemMapper
+public static partial class ReceiptItemMapper
 {
-	[MapProperty(nameof(ReceiptItem.UnitPrice.Amount), nameof(ReceiptItemResponse.UnitPrice))]
-	[MapperIgnoreSource(nameof(ReceiptItem.TotalAmount))]
-	[MapperIgnoreSource(nameof(ReceiptItem.Classification))]
-	[MapperIgnoreSource(nameof(ReceiptItem.NormalizationIntent))]
-	[MapperIgnoreSource(nameof(ReceiptItem.EnvelopeOverrideId))]
-	[MapperIgnoreTarget(nameof(ReceiptItemResponse.AdditionalProperties))]
-	public partial ReceiptItemResponse ToResponse(ReceiptItem source);
+	[MapperIgnoreTarget(nameof(ReceiptItem.CurrentClassification))]
+	[MapperIgnoreSource(nameof(CreateReceiptItemRequest.UnitOfMeasure))]
+	[MapperIgnoreTarget(nameof(ReceiptItem.UnitOfMeasure))]
+	private static partial ReceiptItem ToDomainPartial(CreateReceiptItemRequest request);
 
-	public ReceiptItem ToDomain(CreateReceiptItemRequest source)
+	public static ReceiptItem ToDomain(CreateReceiptItemRequest request)
 	{
-		decimal quantity = (decimal)source.Quantity;
-		decimal unitPrice = (decimal)source.UnitPrice;
-		Money unitPriceMoney = new(unitPrice, Currency.USD);
-		Money totalAmount = new(Math.Round(quantity * unitPrice, 2, MidpointRounding.AwayFromZero), Currency.USD);
-
-		return new ReceiptItem(
-			Guid.Empty,
-			source.ReceiptItemCode,
-			source.Description,
-			quantity,
-			unitPriceMoney,
-			totalAmount,
-			// Request labels are retired and ignored; a new item stores none.
-			"",
-			null,
-			source.UnitOfMeasure
-		)
+		ReceiptItem item = ToDomainPartial(request);
+		if (!string.IsNullOrWhiteSpace(request.UnitOfMeasure))
 		{
-			NormalizationIntent = MapIntent(source.NormalizationIntent),
-			Classification = MapClassification(source.Classification),
-			EnvelopeOverrideId = source.EnvelopeId,
-			OccasionId = source.OccasionId,
-		};
+			item.SetUnitOfMeasure(request.UnitOfMeasure);
+		}
+
+		return item;
 	}
 
-	public ReceiptItem ToDomain(UpdateReceiptItemRequest source)
-	{
-		decimal quantity = (decimal)source.Quantity;
-		decimal unitPrice = (decimal)source.UnitPrice;
-		Money unitPriceMoney = new(unitPrice, Currency.USD);
-		Money totalAmount = new(Math.Round(quantity * unitPrice, 2, MidpointRounding.AwayFromZero), Currency.USD);
+	[MapperIgnoreTarget(nameof(ReceiptItem.CurrentClassification))]
+	[MapperIgnoreSource(nameof(ReceiptItem.NormalizedDescriptionId))]
+	[MapperIgnoreSource(nameof(ReceiptItem.NormalizedDescriptionName))]
+	[MapperIgnoreSource(nameof(UpdateReceiptItemRequest.UnitOfMeasure))]
+	[MapperIgnoreTarget(nameof(ReceiptItem.UnitOfMeasure))]
+	private static partial ReceiptItem ToDomainPartial(UpdateReceiptItemRequest request, ReceiptItem existing);
 
-		return new ReceiptItem(
-			source.Id,
-			source.ReceiptItemCode,
-			source.Description,
-			quantity,
-			unitPriceMoney,
-			totalAmount,
-			// Request labels are retired and ignored; an edit keeps the stored labels.
-			"",
-			null,
-			source.UnitOfMeasure
-		)
+	public static ReceiptItem ToDomain(UpdateReceiptItemRequest request, ReceiptItem existing)
+	{
+		ReceiptItem item = ToDomainPartial(request, existing);
+		if (request.UnitOfMeasure is null)
 		{
-			NormalizationIntent = MapIntent(source.NormalizationIntent),
-			Classification = MapClassification(source.Classification),
-			EnvelopeOverrideId = source.EnvelopeId,
-			OccasionId = source.OccasionId,
-		};
+			return item;
+		}
+
+		if (string.IsNullOrWhiteSpace(request.UnitOfMeasure))
+		{
+			item.ClearUnitOfMeasure();
+		}
+		else
+		{
+			item.SetUnitOfMeasure(request.UnitOfMeasure);
+		}
+
+		return item;
 	}
 
-	private static Domain.Taxonomy.ClassificationIntent? MapClassification(ClassificationRequest? value)
-		=> value is null ? null : new(value.CategoryId, value.TaxonomyRevisionId, value.ExpectedAssignmentId, value.OperationId, value.Reason);
+	[MapProperty(nameof(ReceiptItem.UnitPrice), nameof(ReceiptItemResponse.UnitPrice))]
+	[MapProperty(nameof(ReceiptItem.TotalAmount), nameof(ReceiptItemResponse.TotalAmount))]
+	[MapperIgnoreSource(nameof(ReceiptItem.CurrentClassification))]
+	public static partial ReceiptItemResponse ToResponse(ReceiptItem item);
 
-	private static Domain.NormalizedDescriptions.ReceiptNormalizationIntent? MapIntent(API.Generated.Dtos.ReceiptNormalizationIntent? value)
-		=> value is null ? null : new((Domain.NormalizedDescriptions.ReceiptNormalizationIntentKind)value.Kind,
-			value.ClientRowId, value.SourceFingerprint, value.TargetId, value.ExpectedTargetRevision, value.ExpectedMappingRevision,
-			value.ExpectedItemRevision, value.NewName, value.RememberSource, value.Reason);
-
-	private static CurrentClassificationResponse MapCurrentClassification(Domain.Taxonomy.CurrentClassification source) => new()
-	{
-		AssignmentId = source.AssignmentId,
-		CategoryId = source.CategoryId,
-		TaxonomyRevisionId = source.TaxonomyRevisionId,
-		RecordedPath = source.RecordedPath.Select(node => new TaxonomyNodeResponse
-		{
-			Id = node.Id,
-			ParentId = node.ParentId,
-			Name = node.Name,
-			Definition = node.Definition,
-			Archived = node.Archived
-		}).ToList()
-	};
-
-	private double MapDecimalToDouble(decimal value) => (double)value;
+	private static MoneyResponse MapMoney(Money money) => new(money.Amount, money.Currency.ToString());
 }
