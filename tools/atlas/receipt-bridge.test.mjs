@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
   toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric,
-  getFireflyWithdrawals, suggestFireflyLink
+  getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits
 } from "./receipt-bridge-core.mjs";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
 
@@ -271,9 +271,9 @@ test("Paperless draft inbox lists only bounded authenticated source summaries", 
 });
 test("malformed request bodies fail with 400, not a generic 422", async () => {
   await exerciseBridge(async ({url, bridge}) => {
+    const raw = (path, body) => fetch(url+path, { method: "PUT", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body });
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
-    const raw = (path, body) => fetch(url+path, { method: "PUT", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body });
     const badPut = await raw("/drafts/44", "{not json");
     assert.equal(badPut.status, 400);
     assert.match(await badPut.text(), /Malformed/);
@@ -319,7 +319,7 @@ test("concurrent approvals cannot create duplicate purchases", async () => {
   });
 });
 test("reviewer corrections survive OCR changes until re-review", async () => {
-  await exerciseBridge(async ({url, bridge, calls, setDocument}) => {
+  await exerciseBridge(async ({url, bridge, setDocument, calls}) => {
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
     const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus" };
@@ -352,4 +352,42 @@ test("confirmed payment links store durably without touching the ledger", async 
     assert.equal(calls.some(c=>c.host==="firefly.test"&&c.method!=="GET"), false);
     assert.equal(calls.some(c=>c.host==="receipts.test"), false);
   }, { fireflyPages: pages });
+});
+test("unit spellings normalize to the canonical catalog without guessing", () => {
+  assert.equal(normalizeUnit("GAL"), "gal");
+  assert.equal(normalizeUnit(" gallons "), "gal");
+  assert.equal(normalizeUnit("Lbs"), "lb");
+  assert.equal(normalizeUnit("L"), "l");
+  assert.equal(normalizeUnit("fl_oz"), "fl_oz");
+  assert.equal(normalizeUnit(""), null);
+  assert.equal(normalizeUnit(null), null);
+  assert.equal(normalizeUnit("litre"), "l");
+  assert.equal(normalizeUnit("dozen"), undefined);
+  assert.equal(normalizeUnit("scoop"), undefined);
+  assert.ok(canonicalUnits.has("gal") && canonicalUnits.has("g") && canonicalUnits.has("ml") && canonicalUnits.has("each"));
+});
+test("recognized units flow to the import payload with the Paperless source", () => {
+  const withUnit = { ...good, items: [{ ...good.items[0], unit: "GAL" }, good.items[1]] };
+  const q = qualifyItemization(withUnit, ocr);
+  assert.equal(q.ok, true);
+  assert.equal(q.items[0].unitOfMeasure, "gal");
+  assert.equal(q.items[1].unitOfMeasure, null);
+  const payload = toCompleteReceiptRequest(q, "atlas-test", 44);
+  assert.equal(payload.items[0].unitOfMeasure, "gal");
+  assert.equal(payload.receipt.sourcePaperlessDocumentId, 44);
+});
+test("unrecognized units require review and never silently import", async () => {
+  const bad = { ...good, items: [{ ...good.items[0], unit: "dozen" }, good.items[1]] };
+  assert.equal(qualifyItemization(bad, ocr).ok, false);
+  assert.ok(qualifyItemization(bad, ocr).problems.includes("Unit needs review"));
+  await exerciseBridge(async ({ url, bridge, calls }) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const edited = { ...bridge.state(44).draft, items: [{ ...bridge.state(44).draft.items[0], unit: "scoop" }] };
+    const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(saved.status, 200);
+    const out = await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(out.status, 422);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 0);
+  });
 });
