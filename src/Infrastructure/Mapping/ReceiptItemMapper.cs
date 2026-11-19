@@ -62,9 +62,11 @@ public partial class ReceiptItemMapper
 	private static ReceiptItem FromStoredState(ReceiptItemEntity source)
 		=> ReceiptItem.FromStoredState(source.Id, source.ReceiptItemCode, source.Description,
 			source.Quantity, new Money(source.UnitPrice, source.UnitPriceCurrency),
-			new Money(source.TotalAmount, source.TotalAmountCurrency), source.Category, source.Subcategory);
+			new Money(source.TotalAmount, source.TotalAmountCurrency), source.Category, source.Subcategory,
+			source.UnitOfMeasure);
 
 	private Money MapUnitPrice(decimal amount, Currency currency) => new(amount, currency);
+	private Money MapTotalPrice(decimal amount, Currency currency) => new(amount, currency);
 	private Money MapTotalAmount(decimal amount, Currency currency) => new(amount, currency);
 
 	[MapperIgnoreSource(nameof(ReceiptItemEntity.Receipt))]
@@ -92,22 +94,3 @@ public partial class ReceiptItemMapper
 	[MapperIgnoreSource(nameof(ReceiptItemEntity.EnvelopeOverrideId))]
 	[MapperIgnoreTarget(nameof(ReceiptItem.EnvelopeOverrideId))]
 	private partial ReceiptItem ToDomainPartial(ReceiptItemEntity source);
-
-	public ReceiptItem ToDomain(ReceiptItemEntity source)
-	{
-		ReceiptItem domain = ToDomainPartial(source);
-		// Denormalize the neighbour's name from the nav property for read paths. Mapperly can emit
-		// the direct FK via the partial method above, but the nested path through the
-		// navigation requires a custom projection.
-		//
-		// The DISPLAY name, not the raw matched text: once a row is renamed, showing a receipt
-		// item under the old receipt-scanned string would contradict every other surface
-		// (RECEIPTS-876).
-		domain.NormalizedDescriptionName = source.NormalizedDescription is null
-			|| source.NormalizedDescription.Status == Domain.NormalizedDescriptions.NormalizedDescriptionStatus.Rejected
-			|| source.NormalizationReviewState == Domain.NormalizedDescriptions.NormalizationReviewState.Excluded
-			? null
-			: source.NormalizedDescription.DisplayLabel ?? source.NormalizedDescription.CanonicalName;
-		return domain;
-	}
-}
