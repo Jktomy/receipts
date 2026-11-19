@@ -34,7 +34,9 @@ public partial class ReceiptItemMapper
 			// Request labels are retired and ignored; a new item stores none.
 			"",
 			null,
-			source.UnitOfMeasure
+			source.UnitOfMeasure,
+			source.PackageContentQuantity,
+			source.PackageContentUnit
 		)
 		{
 			NormalizationIntent = MapIntent(source.NormalizationIntent),
@@ -61,7 +63,9 @@ public partial class ReceiptItemMapper
 			// Request labels are retired and ignored; an edit keeps the stored labels.
 			"",
 			null,
-			source.UnitOfMeasure
+			source.UnitOfMeasure,
+			source.PackageContentQuantity,
+			source.PackageContentUnit
 		)
 		{
 			NormalizationIntent = MapIntent(source.NormalizationIntent),

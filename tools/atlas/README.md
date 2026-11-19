@@ -47,7 +47,7 @@ not the PDF. Paperless's original remains in its own archive.
 The bridge verifies the token, then reads:
 
     GET /api/documents/{id}/
-    Authorization: Token *** read-only API token>
+    Authorization: Token <Paperless read-only API token>
 
 It rejects documents without the expected tag, with configured blocked
 medical/sensitive tags, without latest OCR content, or with oversized text.
@@ -67,7 +67,7 @@ A draft includes: merchant, date, grand total, tax, line-item names,
 quantities, unit prices, extended prices, product/SKU if printed, adjustments
 (coupons/discounts with negative sign), exact OCR evidence snippets, and a
 confidence mark. Source evidence is required for merchant, date, total and
-every item. Monetary amounts use integer cents; weighed product quantities
+every item. Monetary amounts use integer cents; weighted product quantities
 and unit prices preserve up to **four decimal places** to match Receipts'
 database precision. Model output is *not* treated as authority.
 
@@ -83,7 +83,7 @@ necessary but cannot prove that AI parsed a receipt perfectly.
 If the owner approves a draft, the adapter calls the existing Receipts API:
 
     POST /api/receipts/complete
-    X-API-Key: *** key scoped to this operator>
+    X-API-Key: <Receipts key scoped to this operator>
     {
       "clientRequestId": "<deterministic UUID from Paperless instance + document ID>",
       "receipt": { "location": "H-E-B", "date": "2026-11-18", "taxAmount": 0.61 },
@@ -136,26 +136,28 @@ follow-up source change requiring review.
 - GET /drafts/{paperlessId} — operator token; inspect draft, status, draftRevision
   and any confirmed Firefly association
 - PUT /drafts/{paperlessId} — operator token; correct a pending draft (the same
-  OCR evidence checks still run before save). Returns the new draftRevision and
-  marks the draft reviewer-edited; a later OCR change then preserves these
-  corrections instead of silently replacing them.
+  OCR evidence checks still run before save). Requires { "expectedRevision" }
+  naming the revision edited (compare-and-swap): a stale save is rejected with
+  409 instead of silently overwriting another reviewer's corrections. Returns
+  the new draftRevision and marks the draft reviewer-edited; a later OCR change
+  then preserves these corrections instead of silently replacing them.
 - POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create.
-  Accepts an optional { "expectedRevision" }: when present, a stale approval is
-  rejected with 409 instead of importing a newer draft. Concurrent approvals are
-  serialized; the second sees the recorded receiptId (idempotent replay), never
-  a duplicate purchase. An import attempted after the OCR changed is rejected
+  Requires { "expectedRevision" }: the approver names the exact draft revision
+  reviewed, and a stale approval is rejected with 409 instead of importing a
+  newer draft. There is no silent legacy path: an approval without a named
+  revision is rejected with 400. Concurrent approvals are serialized; the
+  second sees the recorded receiptId (idempotent replay), never a duplicate
+  purchase. An import attempted after the OCR changed is rejected
   with 409 until the draft is corrected and saved again.
-  Legacy callers may omit expectedRevision (the interactive review client always
-  sends it); an omitted revision keeps the OCR-hash guard only, so a concurrent
-  edit between approval click and dispatch is not detected. That exception is
-  deliberate for older clients and is the one known gap in stale-approval
-  detection — new clients must always send the revision they approved.
 - POST /drafts/{paperlessId}/match — operator token; provide a reviewed
   fireflySourceAccountId, return read-only Firefly candidate IDs
 - POST /drafts/{paperlessId}/confirm-match — operator token; provide the
   suggested fireflyTransactionId plus fireflySourceAccountId. Stored only when
   it still equals the current unique PROPOSED_MATCH; rejected with 409
-  otherwise. Never writes to Firefly.
+  otherwise. A payment already confirmed on a different receipt is rejected
+  with 409 (global one-to-one: checked across all drafts, atomically, so two
+  receipts can never claim the same payment); replaying the same receipt's own
+  confirmation stays idempotent 200. Never writes to Firefly.
   The confirmed association lives in bridge-side state (durable JSON) and is
   carried into Receipts alongside the new sourcePaperlessDocumentId as soon as
   the import runs — it is not yet a native Receipts field. Native migration

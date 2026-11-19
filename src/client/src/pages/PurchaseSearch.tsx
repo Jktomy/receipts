@@ -496,7 +496,7 @@ export default function PurchaseSearch() {
                             true,
                           )}
                         </td>
-                        <td className="px-4 py-3">{item.quantity}{item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}</td>
+                        <td className="px-4 py-3">{item.quantity}{item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}{item.packageContentQuantity != null && item.packageContentUnit ? ` × ${item.packageContentQuantity} ${item.packageContentUnit}` : ""}</td>
                         <td className="whitespace-nowrap px-4 py-3 font-mono">
                           {formatPurchasePrice(
                             item.totalAmount,
@@ -508,6 +508,8 @@ export default function PurchaseSearch() {
                             item.quantity,
                             Number(item.unitPrice),
                             item.unitOfMeasure ?? null,
+                            item.packageContentQuantity ?? null,
+                            item.packageContentUnit ?? null,
                           );
                           if (!comparable) {
                             return (

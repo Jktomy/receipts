@@ -81,6 +81,20 @@ export function normalizeUnit(raw) {
   return unitAliases[key];
 }
 
+const unitDimensions = {
+  each: "count", count: "count",
+  g: "mass", kg: "mass", oz: "mass", lb: "mass",
+  ml: "volume", l: "volume", fl_oz: "volume",
+  cup: "volume", pt: "volume", qt: "volume", gal: "volume"
+};
+
+/** Count, mass or volume for a canonical unit; undefined when unknown. */
+export function dimensionOfUnit(raw) {
+  const normalized = normalizeUnit(raw);
+  if (normalized === null || normalized === undefined) return normalized;
+  return unitDimensions[normalized];
+}
+
 /**
  * Persist only the defined purchase fields. Model responses and operator
  * corrections are not allowed to introduce account numbers, narrative notes,
@@ -106,7 +120,9 @@ export function sanitizePurchaseDraft(raw) {
       evidence: pick(item?.evidence, 300),
       quantity: pick(item?.quantity ?? "1", 30),
       unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30),
-      unit: pick(item?.unit, 16)
+      unit: pick(item?.unit, 16),
+      packageContentQuantity: pick(item?.packageContentQuantity, 30),
+      packageContentUnit: pick(item?.packageContentUnit, 16)
     })) : [],
     adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
       type: pick(adjustment?.type, 30), amount: pick(adjustment?.amount, 30),
@@ -160,7 +176,35 @@ export function qualifyItemization(raw, ocrText) {
     if (rawItem?.unit !== undefined && rawItem?.unit !== null && String(rawItem.unit).trim() !== "" && unitOfMeasure === undefined) {
       problems.push("Unit needs review");
     }
-    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code, unitOfMeasure });
+    // Package content: when present, quantity counts packages and the content
+    // carries the measurable amount inside each package (e.g. 64 fl_oz per
+    // carton). The item unit must then count packages, never a mass/volume.
+    let packageContentQuantity = null, packageContentUnit = null;
+    const contentQtyText = rawItem?.packageContentQuantity;
+    const contentUnitText = rawItem?.packageContentUnit;
+    const hasContent = (contentQtyText !== undefined && contentQtyText !== null && String(contentQtyText).trim() !== "") ||
+      (contentUnitText !== undefined && contentUnitText !== null && String(contentUnitText).trim() !== "");
+    if (hasContent) {
+      try {
+        const parsed = quantityTenThousandths(contentQtyText);
+        packageContentQuantity = Number(parsed) / 10000;
+      } catch {
+        problems.push("Package content quantity requires review");
+      }
+      packageContentUnit = normalizeUnit(contentUnitText);
+      if (packageContentUnit === undefined || packageContentUnit === null) {
+        problems.push("Package content unit requires review");
+      } else {
+        const contentDimension = dimensionOfUnit(packageContentUnit);
+        if (contentDimension !== "mass" && contentDimension !== "volume") {
+          problems.push("Package content must be a mass or volume");
+        }
+      }
+      if (unitOfMeasure !== null && unitOfMeasure !== "each" && unitOfMeasure !== "count") {
+        problems.push("Unit must count packages when package content is set");
+      }
+    }
+    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code, unitOfMeasure, packageContentQuantity, packageContentUnit });
     subtotal += extended;
   }
   const adjustments = [];
@@ -250,7 +294,7 @@ const extractionRules = [
   "Return ONE JSON object, not markdown, with merchant, date (YYYY-MM-DD), total, tax, currency USD,",
   "confidence ('high' only if all figures and line evidence are clear), hasRefunds, mixedTender,",
   "merchantEvidence, dateEvidence, totalEvidence: short verbatim substrings of the supplied OCR.",
-  "items array of {description, sku, quantity, unitPrice, total, evidence}, and adjustments array",
+  "items array of {description, sku, quantity, unitPrice, total, unit, evidence}, and adjustments array",
   "of {type, amount, description}. Totals, tax and adjustments must be decimal strings with two decimals; quantity and unitPrice may use four decimals.",
   "Each evidence must be copied verbatim from a line in the supplied OCR.",
   "Separate signed discounts and coupons into adjustments (negative amounts); use tip/other for additions.",

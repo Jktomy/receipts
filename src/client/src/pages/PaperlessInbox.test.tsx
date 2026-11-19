@@ -36,6 +36,7 @@ function draftPayload(rev: number, confirmed: string | null) {
           quantity: "1",
           unitPrice: "3.99",
           total: "3.99",
+          evidence: "MILK 1 3.99",
         },
       ],
       adjustments: [],
@@ -206,6 +207,60 @@ describe("PaperlessInbox", () => {
     await user.click(screen.getByRole("button", { name: "Add adjustment" }));
     await user.type(screen.getByLabelText("Adjustment 1 type"), "coupon");
     await user.type(screen.getByLabelText("Adjustment 1 amount"), "-1.00");
+    await user.click(screen.getByRole("button", { name: "Save corrections" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Corrections saved/)).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: /Approve/ }));
+    await waitFor(() =>
+      expect(screen.getByText(/Imported to Receipts/)).toBeInTheDocument(),
+    );
+    expect(state.lastImport).toEqual({ expectedRevision: 3 });
+  });
+
+  it("sends the edited revision when saving corrections", async () => {
+    const state: BridgeState = {
+      rev: 1,
+      confirmed: null,
+      lastPut: null,
+      lastImport: null,
+      lastConfirm: null,
+    };
+    installBridge(state);
+    const user = await openDraft();
+    await user.type(screen.getByLabelText("Item 1 unit"), "gal");
+    await user.click(screen.getByRole("button", { name: "Save corrections" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Corrections saved/)).toBeInTheDocument(),
+    );
+    expect((state.lastPut as { expectedRevision?: number }).expectedRevision).toBe(1);
+  });
+
+  it("requires printed-line evidence for added items before approval", async () => {
+    const state: BridgeState = {
+      rev: 1,
+      confirmed: null,
+      lastPut: null,
+      lastImport: null,
+      lastConfirm: null,
+    };
+    installBridge(state);
+    const user = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Add item" }));
+    expect(screen.getByLabelText("Item 2 evidence")).toBeInTheDocument();
+    expect(screen.getByLabelText("Item 2 package content quantity")).toBeInTheDocument();
+    expect(screen.getByLabelText("Item 2 package content unit")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save corrections" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Corrections saved/)).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: /Approve/ }));
+    expect(await screen.findByText(/needs its exact printed receipt line/)).toBeInTheDocument();
+    expect(state.lastImport).toBeNull();
+    await user.type(screen.getByLabelText("Item 2 description"), "Eggs");
+    await user.type(screen.getByLabelText("Item 2 unitPrice"), "5.00");
+    await user.type(screen.getByLabelText("Item 2 total"), "5.00");
+    await user.type(screen.getByLabelText("Item 2 evidence"), "EGGS 1 5.00");
     await user.click(screen.getByRole("button", { name: "Save corrections" }));
     await waitFor(() =>
       expect(screen.getByText(/Corrections saved/)).toBeInTheDocument(),

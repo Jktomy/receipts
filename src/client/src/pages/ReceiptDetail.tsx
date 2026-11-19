@@ -321,6 +321,8 @@ function ReceiptDetail() {
               quantity: Number(i.quantity ?? 0),
               unitPrice: Number(i.unitPrice ?? 0),
               unitOfMeasure: i.unitOfMeasure ?? null,
+              packageContentQuantity: i.packageContentQuantity ?? null,
+              packageContentUnit: i.packageContentUnit ?? null,
               currentClassification: i.currentClassification,
               normalizedDescriptionName: i.normalizedDescriptionName,
               normalizationRevision: i.normalizationRevision,

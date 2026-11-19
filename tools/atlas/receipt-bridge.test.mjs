@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
   toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric,
-  getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits
+  getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits, dimensionOfUnit
 } from "./receipt-bridge-core.mjs";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
 
@@ -189,9 +189,9 @@ test("explicit review imports to Receipts, replay is idempotent and never writes
   await exerciseBridge(async({url,bridge,calls})=>{
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
-    const first=await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    const first=await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
     assert.equal(first.status,200);
-    const second=await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    const second=await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
     assert.equal(second.status,200);
     assert.equal(bridge.state(44).receiptId,"receipts-101");
     assert.equal(calls.filter(c=>c.host==="receipts.test").length,1);
@@ -205,7 +205,7 @@ test("source OCR revision changing after preview blocks imports",async()=>{
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
     setDocument({content:ocr+"\nADDITIONAL CHARGE 3.00"});
-    const out=await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    const out=await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
     assert.equal(out.status,409);
     assert.equal(calls.filter(c=>c.host==="receipts.test").length,0);
   });
@@ -228,7 +228,7 @@ test("unexpected model fields cannot survive into persisted purchase drafts", as
     assert.equal(state.draft.accountNumber,undefined);
     assert.equal(state.draft.cardNumber,undefined);
     assert.equal(state.draft.items[0].cardNumber,undefined);
-    const edited = {...state.draft, cardNumber: "4111111111111111"};
+    const edited = {...state.draft, cardNumber: "4111111111111111", expectedRevision: state.draftRevision};
     const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
     assert.equal(saved.status,200);
     assert.equal(bridge.state(44).draft.cardNumber,undefined);
@@ -271,9 +271,9 @@ test("Paperless draft inbox lists only bounded authenticated source summaries", 
 });
 test("malformed request bodies fail with 400, not a generic 422", async () => {
   await exerciseBridge(async ({url, bridge}) => {
-    const raw = (path, body) => fetch(url+path, { method: "PUT", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body });
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
+    const raw = (path, body) => fetch(url+path, { method: "PUT", headers: { "Content-Type": "application/json", "x-atlas-operator-key": config.operatorSecret }, body });
     const badPut = await raw("/drafts/44", "{not json");
     assert.equal(badPut.status, 400);
     assert.match(await badPut.text(), /Malformed/);
@@ -290,7 +290,7 @@ test("reviewed draft revision rejects stale approvals", async () => {
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
     assert.equal(bridge.state(44).draftRevision, 1);
-    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus" };
+    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus", expectedRevision: bridge.state(44).draftRevision };
     const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).draftRevision, 2);
@@ -319,10 +319,10 @@ test("concurrent approvals cannot create duplicate purchases", async () => {
   });
 });
 test("reviewer corrections survive OCR changes until re-review", async () => {
-  await exerciseBridge(async ({url, bridge, setDocument, calls}) => {
+  await exerciseBridge(async ({url, bridge, calls, setDocument}) => {
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
-    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus" };
+    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus", expectedRevision: bridge.state(44).draftRevision };
     await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
     setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
     await bridge.processDocument(44);
@@ -353,6 +353,7 @@ test("confirmed payment links store durably without touching the ledger", async 
     assert.equal(calls.some(c=>c.host==="receipts.test"), false);
   }, { fireflyPages: pages });
 });
+
 test("unit spellings normalize to the canonical catalog without guessing", () => {
   assert.equal(normalizeUnit("GAL"), "gal");
   assert.equal(normalizeUnit(" gallons "), "gal");
@@ -383,11 +384,80 @@ test("unrecognized units require review and never silently import", async () => 
   await exerciseBridge(async ({ url, bridge, calls }) => {
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     await untilReady(bridge,44);
-    const edited = { ...bridge.state(44).draft, items: [{ ...bridge.state(44).draft.items[0], unit: "scoop" }] };
+    const edited = { ...bridge.state(44).draft, expectedRevision: bridge.state(44).draftRevision, items: [{ ...bridge.state(44).draft.items[0], unit: "scoop" }] };
     const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
     assert.equal(saved.status, 200);
-    const out = await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    const out = await http(url+"/drafts/44/import","POST",{expectedRevision:2},"x-atlas-operator-key",config.operatorSecret);
     assert.equal(out.status, 422);
     assert.equal(calls.filter(c=>c.host==="receipts.test").length, 0);
   });
+});
+test("one Firefly payment cannot back two receipts; own replay stays idempotent", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, setDocument}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const first = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(first.status, 200);
+    // Second receipt for the same purchase: switch the mocked Paperless doc id.
+    setDocument({id:45});
+    await http(url+"/hooks/paperless","POST",{sourceId:45},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,45);
+    const dup = await http(url+"/drafts/45/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(dup.status, 409);
+    assert.equal((await dup.json()).claimedByPaperlessId, 44);
+    assert.equal(bridge.state(45).confirmedFireflyTransactionId, undefined);
+    // Replaying receipt 44's own confirmation is still idempotent 200.
+    setDocument({id:44});
+    const replay = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json()).status, "MATCH_CONFIRMED");
+  }, { fireflyPages: pages });
+});
+test("draft saves require the edited revision; stale saves are rejected", async () => {
+  await exerciseBridge(async ({url, bridge}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const missing = await http(url+"/drafts/44","PUT",{...bridge.state(44).draft},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(missing.status, 400);
+    const stale = await http(url+"/drafts/44","PUT",{...bridge.state(44).draft, expectedRevision:99},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(stale.status, 409);
+    const current = await http(url+"/drafts/44","PUT",{...bridge.state(44).draft, merchant:"H-E-B Plus", expectedRevision:bridge.state(44).draftRevision},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(current.status, 200);
+    assert.equal((await current.json()).draftRevision, 2);
+    assert.equal(bridge.state(44).draft.merchant, "H-E-B Plus");
+  });
+});
+test("import approvals require the reviewed revision", async () => {
+  await exerciseBridge(async ({url, bridge, calls}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const missing = await http(url+"/drafts/44/import","POST",{},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(missing.status, 400);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 0);
+    const fresh = await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(fresh.status, 200);
+  });
+});
+test("package content validates: measurable per package, countable unit", () => {
+  assert.equal(dimensionOfUnit("gal"), "volume");
+  assert.equal(dimensionOfUnit("lb"), "mass");
+  assert.equal(dimensionOfUnit("each"), "count");
+  assert.equal(dimensionOfUnit("scoop"), undefined);
+  const carton = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"64", packageContentUnit:"fl_oz"}, good.items[1]]};
+  const q = qualifyItemization(carton, ocr);
+  assert.equal(q.ok, true);
+  assert.equal(q.items[0].packageContentQuantity, 64);
+  assert.equal(q.items[0].packageContentUnit, "fl_oz");
+  const payload = toCompleteReceiptRequest(q, "atlas-test", 44);
+  assert.equal(payload.items[0].packageContentQuantity, 64);
+  assert.equal(payload.items[0].packageContentUnit, "fl_oz");
+  const badQty = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"lots", packageContentUnit:"fl_oz"}]};
+  assert.ok(qualifyItemization(badQty, ocr).problems.includes("Package content quantity requires review"));
+  const massUnit = {...good, items:[{...good.items[0], unit:"fl_oz", packageContentQuantity:"64", packageContentUnit:"fl_oz"}]};
+  assert.ok(qualifyItemization(massUnit, ocr).problems.includes("Unit must count packages when package content is set"));
+  const badUnit = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"64", packageContentUnit:"scoop"}]};
+  assert.ok(qualifyItemization(badUnit, ocr).problems.includes("Package content unit requires review"));
+  const half = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"64"}]};
+  assert.ok(qualifyItemization(half, ocr).problems.includes("Package content unit requires review"));
 });

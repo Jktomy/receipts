@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { PageHead } from "@/components/primitives";
@@ -13,6 +13,8 @@ type AtlasItem = {
   unit?: string;
   unitPrice?: string;
   total?: string;
+  packageContentQuantity?: string;
+  packageContentUnit?: string;
 };
 type AtlasAdjustment = { type?: string; amount?: string; description?: string };
 type AtlasDraft = {
@@ -86,7 +88,7 @@ function Field({ label, value, onChange }: {
   );
 }
 
-const blankItem: AtlasItem = { description: "", quantity: "1", unit: "", unitPrice: "", total: "", evidence: "", sku: "" };
+const blankItem: AtlasItem = { description: "", quantity: "1", unit: "", unitPrice: "", total: "", evidence: "", sku: "", packageContentQuantity: "", packageContentUnit: "" };
 const blankAdjustment: AtlasAdjustment = { type: "", amount: "", description: "" };
 
 export default function PaperlessInbox() {
@@ -166,9 +168,11 @@ export default function PaperlessInbox() {
   }
   async function save() {
     if (!selected || !draft) return;
+    if (selected.draftRevision == null) { setError("Reload the draft before saving corrections."); return; }
     setBusy(true); setError(undefined);
     try {
-      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}`, "PUT", draft);
+      // Compare-and-swap: name the revision edited so a concurrent reviewer save is rejected, not silently lost.
+      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}`, "PUT", { ...draft, expectedRevision: selected.draftRevision });
       setDirty(false); setMessage("Corrections saved. Re-run import validation before approval.");
       const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
       setSelected(state);
@@ -178,11 +182,14 @@ export default function PaperlessInbox() {
   }
   async function importReceipt() {
     if (!selected || !draft || dirty) return;
+    const missingEvidence = (draft.items ?? []).findIndex(item => !(item.evidence ?? "").trim());
+    if (missingEvidence >= 0) { setError(`Item ${missingEvidence + 1} needs its exact printed receipt line before approval.`); return; }
+    if (selected.draftRevision == null) { setError("Reload the draft before approving."); return; }
     if (!window.confirm("Import these reviewed line items into Receipts? This does NOT change Firefly.")) return;
     setBusy(true); setError(undefined);
     try {
       // Send the reviewed revision so a stale approval is rejected, not imported.
-      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision ?? undefined });
+      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision });
       setMessage("Imported to Receipts. Firefly remains unchanged.");
       await refresh();
       const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
@@ -300,7 +307,8 @@ export default function PaperlessInbox() {
                     <thead><tr><th className="text-left">Product</th><th>Quantity</th><th>Unit</th><th>Unit price</th><th>Line total</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>
                       {(draft.items ?? []).map((item, index) => (
-                        <tr key={index}>
+                        <Fragment key={index}>
+                        <tr>
                           {(["description", "quantity", "unit", "unitPrice", "total"] as const).map(key => (
                             <td key={key} className="p-1">
                               <input
@@ -315,6 +323,43 @@ export default function PaperlessInbox() {
                             <button type="button" className="btn xs ghost" aria-label={`Remove item ${index + 1}`} onClick={() => removeItem(index)}>Remove</button>
                           </td>
                         </tr>
+                        <tr>
+                          <td colSpan={6} className="p-1">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                              <label className="block text-xs">
+                                <span className="font-medium">Printed line evidence (exact receipt text)</span>
+                                <input
+                                  aria-label={`Item ${index + 1} evidence`}
+                                  className="mt-1 w-full rounded border bg-background px-2 py-1"
+                                  value={item.evidence ?? ""}
+                                  onChange={e => editItem(index, "evidence", e.target.value)}
+                                  placeholder="Copy the exact printed line"
+                                />
+                              </label>
+                              <label className="block text-xs">
+                                <span className="font-medium">Package content qty</span>
+                                <input
+                                  aria-label={`Item ${index + 1} package content quantity`}
+                                  className="mt-1 w-full rounded border bg-background px-2 py-1"
+                                  value={item.packageContentQuantity ?? ""}
+                                  onChange={e => editItem(index, "packageContentQuantity", e.target.value)}
+                                  placeholder="e.g. 64 for a 64 fl oz carton"
+                                />
+                              </label>
+                              <label className="block text-xs">
+                                <span className="font-medium">Package content unit</span>
+                                <input
+                                  aria-label={`Item ${index + 1} package content unit`}
+                                  className="mt-1 w-full rounded border bg-background px-2 py-1"
+                                  value={item.packageContentUnit ?? ""}
+                                  onChange={e => editItem(index, "packageContentUnit", e.target.value)}
+                                  placeholder="e.g. fl_oz"
+                                />
+                              </label>
+                            </div>
+                          </td>
+                        </tr>
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>

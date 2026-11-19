@@ -92,6 +92,8 @@ public class SearchController(IMediator mediator) : ControllerBase
 				NormalizationReviewState = x.NormalizationReviewState,
 				Quantity = (double)x.Quantity,
 				UnitOfMeasure = x.UnitOfMeasure,
+				PackageContentQuantity = (double?)x.PackageContentQuantity,
+				PackageContentUnit = x.PackageContentUnit,
 				UnitPrice = (double)x.UnitPrice,
 				UnitPriceCurrency = x.UnitPriceCurrency,
 				TotalAmount = (double)x.TotalAmount,

@@ -1626,6 +1626,13 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("text");
 
+                    b.Property<decimal?>("PackageContentQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("PackageContentUnit")
+                        .HasMaxLength(16)
+                        .HasColumnType("text");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,4)");
 

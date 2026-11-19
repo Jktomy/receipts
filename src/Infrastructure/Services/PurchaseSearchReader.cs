@@ -125,6 +125,8 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			: string.IsNullOrEmpty(x.Canonical.DisplayLabel) ? x.Canonical.CanonicalName : x.Canonical.DisplayLabel,
 		x.Item.Quantity,
 		x.Item.UnitOfMeasure,
+		x.Item.PackageContentQuantity,
+		x.Item.PackageContentUnit,
 		x.Item.UnitPrice,
 		x.Item.UnitPriceCurrency,
 		x.Item.TotalAmount,
@@ -159,7 +161,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity,
 			x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
 							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview",
-							x.UnitOfMeasure)
+							x.UnitOfMeasure, x.PackageContentQuantity, x.PackageContentUnit)
 			{
 				CategoryId = bucket.CategoryId,
 				PathRevisionId = bucket.PathRevisionId,

@@ -617,7 +617,9 @@ it("shows comparable per-unit prices and units without merging variants", async 
             description: "Whole milk gallon",
             quantity: 1,
             unitPrice: 3.99,
-            unitOfMeasure: "gal",
+            unitOfMeasure: "each",
+            packageContentQuantity: 1,
+            packageContentUnit: "gal",
           },
           {
             ...item,
@@ -627,8 +629,18 @@ it("shows comparable per-unit prices and units without merging variants", async 
             unitPrice: 4.5,
             unitOfMeasure: null,
           },
+          {
+            ...item,
+            id: "item-ambiguous",
+            description: "Juice carton, unit unclear",
+            quantity: 1,
+            unitPrice: 3.0,
+            unitOfMeasure: "fl_oz",
+            packageContentQuantity: null,
+            packageContentUnit: null,
+          },
         ],
-        total: 2,
+        total: 3,
         offset: 0,
         limit: 25,
       },
@@ -636,7 +648,10 @@ it("shows comparable per-unit prices and units without merging variants", async 
   );
   renderPage("/search?q=milk");
   expect(await screen.findByText("Per unit, comparable")).toBeInTheDocument();
-  expect(screen.getByText("1 gal")).toBeInTheDocument();
+  expect(screen.getByText("1 each × 1 gal")).toBeInTheDocument();
   expect(screen.getByText("USD 0.11 / 100 ml")).toBeInTheDocument();
   expect(screen.getByText("USD 4.50 / each")).toBeInTheDocument();
+  // Bare mass/volume without package content is never labeled comparable.
+  expect(screen.getByText("Juice carton, unit unclear")).toBeInTheDocument();
+  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
 });

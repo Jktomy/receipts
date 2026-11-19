@@ -18,9 +18,9 @@ describe("unit-prices", () => {
     expect(normalizeUnit("dozen")).toBeUndefined();
   });
 
-  it("compares a gallon against a half-gallon jug per millilitre", () => {
-    const gallon = toComparableUnitPrice(1, 3.99, "gal");
-    const halfGallonJug = toComparableUnitPrice(64, 2.09 / 64, "fl_oz");
+  it("compares a gallon jug against a half-gallon jug per millilitre", () => {
+    const gallon = toComparableUnitPrice(1, 3.99, "each", 1, "gal");
+    const halfGallonJug = toComparableUnitPrice(1, 2.09, "each", 64, "fl_oz");
     expect(gallon?.canonicalUnit).toBe("ml");
     expect(halfGallonJug?.canonicalUnit).toBe("ml");
     expect(halfGallonJug!.amountPerCanonicalUnit).toBeGreaterThan(
@@ -28,10 +28,34 @@ describe("unit-prices", () => {
     );
   });
 
-  it("compares weighted produce per gram", () => {
-    const perGram = toComparableUnitPrice(1.25, 2.4599, "lb");
-    expect(perGram?.canonicalUnit).toBe("g");
-    expect(perGram!.amountPerCanonicalUnit).toBeCloseTo(2.4599 / 453.59237, 10);
+  it("prices a carton by its package content, not the package count", () => {
+    // Hoid repro: $3.00 for 1 carton holding 64 fl oz. Naive per-fl-oz math
+    // reads $10.14 per 100 mL; content-aware math reads about $0.16.
+    const carton = toComparableUnitPrice(1, 3.0, "each", 64, "fl_oz");
+    expect(carton?.canonicalUnit).toBe("ml");
+    const display = toDisplayUnitPrice(carton!);
+    expect(display.unit).toBe("100 ml");
+    expect(display.amount).toBeCloseTo(0.16, 2);
+  });
+
+  it("refuses mass/volume without package content as ambiguous", () => {
+    // A bare fl_oz quantity may count packages, not ounces: never label it.
+    expect(toComparableUnitPrice(1, 3.0, "fl_oz")).toBeNull();
+    expect(toComparableUnitPrice(1, 3.99, "gal")).toBeNull();
+    expect(toComparableUnitPrice(1.25, 2.4599, "lb")).toBeNull();
+  });
+
+  it("compares weighed produce once its lot content is modeled", () => {
+    const lot = toComparableUnitPrice(1, 3.07, "each", 1.25, "lb");
+    expect(lot?.canonicalUnit).toBe("g");
+    expect(lot!.amountPerCanonicalUnit).toBeCloseTo(3.07 / (1.25 * 453.59237), 10);
+  });
+
+  it("rejects half-modeled or contradictory package content", () => {
+    expect(toComparableUnitPrice(1, 3.0, "each", 64, null)).toBeNull();
+    expect(toComparableUnitPrice(1, 3.0, "each", null, "fl_oz")).toBeNull();
+    expect(toComparableUnitPrice(1, 3.0, "fl_oz", 64, "fl_oz")).toBeNull();
+    expect(toComparableUnitPrice(1, 3.0, "each", 64, "scoop")).toBeNull();
   });
 
   it("treats missing units as plain countable items", () => {

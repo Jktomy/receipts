@@ -109,4 +109,26 @@ public class CreateReceiptItemRequestValidatorTests
 		CreateReceiptItemRequest request = new() { UnitPrice = 9.99, Description = "Uncertain item", Quantity = 1, Category = "" };
 		Assert.True(_validator.Validate(request).IsValid);
 	}
+
+	[Fact]
+	public void Should_Pass_When_PackageContentModelsACarton()
+	{
+		CreateReceiptItemRequest request = new() { UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 64, PackageContentUnit = "fl_oz" };
+		Assert.True(_validator.Validate(request).IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_PackageContentUnitMissing()
+	{
+		CreateReceiptItemRequest request = new() { UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 64, PackageContentUnit = null };
+		FluentValidation.Results.ValidationResult result = _validator.Validate(request);
+		Assert.False(result.IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_UnitIsMassWithPackageContent()
+	{
+		CreateReceiptItemRequest request = new() { UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "fl_oz", PackageContentQuantity = 64, PackageContentUnit = "fl_oz" };
+		Assert.False(_validator.Validate(request).IsValid);
+	}
 }

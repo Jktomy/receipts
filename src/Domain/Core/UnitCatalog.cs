@@ -84,11 +84,53 @@ public static class UnitCatalog
 		out decimal amountPerCanonicalUnit,
 		out string canonicalUnit)
 	{
+		=> TryGetComparableUnitPrice(quantity, unitPrice, unitOfMeasure, null, null,
+			out amountPerCanonicalUnit, out canonicalUnit);
+
+	/// <summary>
+	/// Comparable price for one canonical unit (each, gram, millilitre).
+	/// Package-size rule: a mass/volume unit WITHOUT package content is NOT
+	/// comparable (the quantity may count packages, not the measured amount).
+	/// Supply packageContent (amount per package) to unlock the comparable, or
+	/// use a count unit. Never converts across dimensions or currencies.
+	/// </summary>
+	public static bool TryGetComparableUnitPrice(
+		decimal quantity,
+		decimal unitPrice,
+		string? unitOfMeasure,
+		decimal? packageContentQuantity,
+		string? packageContentUnit,
+		out decimal amountPerCanonicalUnit,
+		out string canonicalUnit)
+	{
 		amountPerCanonicalUnit = 0m;
 		canonicalUnit = Each;
 		if (quantity <= 0 || unitPrice <= 0)
 		{
 			return false;
+		}
+
+		bool hasContent = packageContentQuantity is not null || packageContentUnit is not null;
+		if (hasContent)
+		{
+			if (packageContentQuantity is null || packageContentQuantity <= 0)
+			{
+				return false;
+			}
+			string? contentNormalized = Normalize(packageContentUnit);
+			if (contentNormalized is null || !Factors.TryGetValue(contentNormalized, out var contentEntry)
+				|| (contentEntry.Dimension != Dimension.Mass && contentEntry.Dimension != Dimension.Volume))
+			{
+				return false;
+			}
+			string itemNormalized = Normalize(unitOfMeasure) ?? Each;
+			if (!Factors.TryGetValue(itemNormalized, out var itemEntry) || itemEntry.Dimension != Dimension.Count)
+			{
+				return false;
+			}
+			amountPerCanonicalUnit = unitPrice / (packageContentQuantity.Value * contentEntry.ToCanonical);
+			canonicalUnit = CanonicalUnitFor(contentEntry.Dimension);
+			return true;
 		}
 
 		string normalized = Normalize(unitOfMeasure) ?? Each;
@@ -97,10 +139,16 @@ public static class UnitCatalog
 			return false;
 		}
 
+		if (entry.Dimension != Dimension.Count)
+		{
+			return false;
+		}
+
 		amountPerCanonicalUnit = unitPrice / entry.ToCanonical;
 		canonicalUnit = CanonicalUnitFor(entry.Dimension);
 		return true;
 	}
+
 
 	public static bool AreComparable(string? first, string? second)
 	{

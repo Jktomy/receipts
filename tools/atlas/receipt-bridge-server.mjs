@@ -38,6 +38,23 @@ function setState(dir, id, state) {
   writeFileSync(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
   renameSync(temp, dest);
 }
+function findOtherClaimant(dir, fireflyTransactionId, exceptId) {
+  // Global one-to-one guard: a single Firefly payment may back at most one
+  // receipt. Reads every draft synchronously (no awaits) so the caller's
+  // check-and-set stays atomic on Node's single thread.
+  let names = [];
+  try { names = readdirSync(dir); } catch { return null; }
+  for (const name of names) {
+    const m = /^paperless-([1-9][0-9]*)\.json$/.exec(name);
+    if (!m) continue;
+    const otherId = Number(m[1]);
+    if (otherId === exceptId) continue;
+    let state = null;
+    try { state = JSON.parse(readFileSync(join(dir, name), "utf8")); } catch { continue; }
+    if (state && state.confirmedFireflyTransactionId === fireflyTransactionId) return otherId;
+  }
+  return null;
+}
 function safeJson(response, status, value) {
   const content = JSON.stringify(value);
   response.writeHead(status, {
@@ -188,7 +205,17 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     if (suggestion.status !== "PROPOSED_MATCH" || suggestion.fireflyTransactionId !== fireflyTransactionId) {
       return { status: 409, result: { error: "Confirmed payment does not equal the current unique suggestion: re-check before linking", suggestion } };
     }
+    // Replay of the same confirmation is idempotent. A different receipt
+    // claiming the same payment is rejected: one-to-one, globally enforced.
+    // No awaits between this check and setState below, so it is atomic.
     const saved = getState(dataDir, id);
+    if (saved?.confirmedFireflyTransactionId === fireflyTransactionId) {
+      return { status: 200, result: { status: "MATCH_CONFIRMED", fireflyTransactionId } };
+    }
+    const other = findOtherClaimant(dataDir, fireflyTransactionId, id);
+    if (other !== null) {
+      return { status: 409, result: { error: "Firefly payment already linked to another receipt: review before linking", claimedByPaperlessId: other } };
+    }
     setState(dataDir, id, {
       ...saved,
       confirmedFireflyTransactionId: fireflyTransactionId,
@@ -258,24 +285,29 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         if (!previous?.contentHash || previous.receiptId) return safeJson(response, 409, { error: "No editable pending draft" });
         if (active.has(id)) return safeJson(response, 409, { error: "Processing still active: retry shortly" });
         const edited = await jsonBody(request, 100000);
+        // Compare-and-swap: the saver must name the revision it edited, so a
+        // second reviewer's save cannot silently overwrite the first.
+        const expectedSave = edited?.expectedRevision;
+        if (!Number.isSafeInteger(expectedSave) || expectedSave < 1) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to save corrections" });
+        }
+        if (expectedSave !== (previous.draftRevision ?? null)) {
+          return safeJson(response, 409, { error: "Draft changed since you loaded it: reload before saving", draftRevision: previous.draftRevision ?? null });
+        }
         const draftRevision = (previous.draftRevision ?? 0) + 1;
         // Still checked against immutable OCR evidence at import time.
         setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [], reviewerEdited: true, draftRevision });
         return safeJson(response, 200, { status: "DRAFT_UPDATED", draftRevision });
       }
       if (request.method === "POST" && match[2] === "import") {
-        // Optional { expectedRevision }: when a reviewer client sends the revision it
-        // reviewed, a stale approval is rejected instead of importing a newer draft.
-        // Legacy callers (empty object) keep the OCR-revision guard only.
+        // Explicit revision required: the approver must name the exact draft
+        // revision reviewed. No silent legacy path: an approval without a
+        // named revision is rejected instead of importing whatever is newest.
         const importBody = await jsonBody(request, 1000);
-        let expectedRevision;
-        if (importBody?.expectedRevision !== undefined) {
-          if (!Number.isSafeInteger(importBody.expectedRevision) || importBody.expectedRevision < 1) {
-            return safeJson(response, 400, { error: "Expected draft revision must be a positive integer" });
-          }
-          expectedRevision = importBody.expectedRevision;
+        if (!Number.isSafeInteger(importBody?.expectedRevision) || importBody.expectedRevision < 1) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to approve an import" });
         }
-        const result = await importReviewed(id, expectedRevision);
+        const result = await importReviewed(id, importBody.expectedRevision);
         return safeJson(response, result.status, result.result);
       }
       if (request.method === "POST" && match[2] === "match") {

@@ -45,16 +45,43 @@ export interface ComparableUnitPrice {
   dimension: UnitDimension;
 }
 
-/** Price for one canonical unit (each, gram, millilitre), or null when not comparable. */
+/** Price for one canonical unit (each, gram, millilitre), or null when not comparable.
+ * Package-size rule: a mass/volume unit WITHOUT package content is NOT
+ * comparable (the quantity may count packages, not the measured amount).
+ * Supply packageContent (amount per package) to unlock the comparable, or use
+ * a count unit. Never converts across dimensions or currencies. */
 export function toComparableUnitPrice(
   quantity: number,
   unitPrice: number,
   unitOfMeasure?: string | null,
+  packageContentQuantity?: number | null,
+  packageContentUnit?: string | null,
 ): ComparableUnitPrice | null {
   if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice) || quantity <= 0 || unitPrice <= 0) return null;
+  const hasContent = (packageContentQuantity !== undefined && packageContentQuantity !== null) ||
+    (typeof packageContentUnit === "string" && packageContentUnit.trim() !== "");
+  if (hasContent) {
+    if (typeof packageContentQuantity !== "number" || !Number.isFinite(packageContentQuantity) || packageContentQuantity <= 0) return null;
+    const contentKey = typeof packageContentUnit === "string" ? packageContentUnit.trim().toLowerCase() : "";
+    const contentEntry = FACTORS[contentKey];
+    if (!contentEntry || (contentEntry.dimension !== "mass" && contentEntry.dimension !== "volume")) return null;
+    // Total price over total content; the package count cancels out.
+    // The item unit must count packages (or be blank), never a mass/volume.
+    const normalized = (typeof unitOfMeasure === "string" && unitOfMeasure.trim() !== "" ? unitOfMeasure.trim().toLowerCase() : "each");
+    const itemEntry = FACTORS[normalized];
+    if (!itemEntry || itemEntry.dimension !== "count") return null;
+    return {
+      amountPerCanonicalUnit: unitPrice / (packageContentQuantity * contentEntry.toCanonical),
+      canonicalUnit: canonicalUnitFor(contentEntry.dimension),
+      dimension: contentEntry.dimension,
+    };
+  }
   const normalized = (typeof unitOfMeasure === "string" && unitOfMeasure.trim() !== "" ? unitOfMeasure.trim().toLowerCase() : "each");
   const entry = FACTORS[normalized];
   if (!entry) return null;
+  // Without package content a mass/volume quantity is ambiguous (packages vs
+  // measured amount), so it is never labeled comparable.
+  if (entry.dimension !== "count") return null;
   return {
     amountPerCanonicalUnit: unitPrice / entry.toCanonical,
     canonicalUnit: canonicalUnitFor(entry.dimension),
