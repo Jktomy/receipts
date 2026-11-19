@@ -37,7 +37,7 @@ public class UpdateReceiptItemRequestValidator : AbstractValidator<UpdateReceipt
 			.WithMessage(UnitOfMeasureNotInCatalog);
 
 		RuleFor(x => x.PackageContentQuantity)
-			.Must((request, qty) => request.PackageContentQuantity is null && request.PackageContentUnit is null || qty > 0)
+			.Must((request, qty) => request.PackageContentQuantity is null && request.PackageContentUnit is null || (qty ?? 0) > 0)
 			.WithMessage(PackageContentQuantityMustBePositive);
 
 		RuleFor(x => x.PackageContentUnit)

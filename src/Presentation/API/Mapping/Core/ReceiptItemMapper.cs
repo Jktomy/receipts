@@ -35,7 +35,7 @@ public partial class ReceiptItemMapper
 			"",
 			null,
 			source.UnitOfMeasure,
-			source.PackageContentQuantity,
+			(decimal?)source.PackageContentQuantity,
 			source.PackageContentUnit
 		)
 		{
@@ -64,7 +64,7 @@ public partial class ReceiptItemMapper
 			"",
 			null,
 			source.UnitOfMeasure,
-			source.PackageContentQuantity,
+			(decimal?)source.PackageContentQuantity,
 			source.PackageContentUnit
 		)
 		{
