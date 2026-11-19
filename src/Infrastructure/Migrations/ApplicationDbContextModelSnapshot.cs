@@ -1485,6 +1485,9 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("text");
 
+                    b.Property<long?>("SourcePaperlessDocumentId")
+                        .HasColumnType("bigint");
+
                     b.Property<decimal>("TaxAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -1617,6 +1620,10 @@ namespace Infrastructure.Migrations
 
                     b.Property<string>("TotalAmountCurrency")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UnitOfMeasure")
+                        .HasMaxLength(16)
                         .HasColumnType("text");
 
                     b.Property<decimal>("UnitPrice")
