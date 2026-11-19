@@ -11,7 +11,6 @@ public static class UnitCatalog
 	public const int MaxLength = 16;
 
 	public const string Each = "each";
-
 	public const string Count = "count";
 
 	public static readonly IReadOnlySet<string> CanonicalUnits =
