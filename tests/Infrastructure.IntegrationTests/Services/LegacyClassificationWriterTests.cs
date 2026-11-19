@@ -32,7 +32,7 @@ public sealed class LegacyClassificationWriterTests : IClassFixture<PostgresFixt
 	[Fact]
 	public async Task ManualLegacySavesBeforeAndAfterBackfillAreAtomicAndDoNotRequireProvidersOrExplicitFlag()
 	{
-		await using var fixture = await this.fixture.CreateIsolatedAsync("20261030134404_AddEnvelopes");
+		await using var fixture = await this.fixture.CreateIsolatedAsync("20261119000000_AddItemUnitAndPaperlessSource");
 		var factory = new Factory(fixture);
 		var repository = new ReceiptItemRepository(factory);
 		var classifications = new ClassificationService(factory, TimeProvider.System, Options.Create(new ClassificationOptions { WritesEnabled = true }));
@@ -112,7 +112,7 @@ public sealed class LegacyClassificationWriterTests : IClassFixture<PostgresFixt
 		string[] applied = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
 		const string legacyEvidenceMigration = "20261025191938_AddLegacyWriteClassificationEvidence";
 		applied.Should().Contain(legacyEvidenceMigration);
-		applied.Should().Equal(db.Database.GetMigrations().TakeWhile(x => string.CompareOrdinal(x, "20261030134404_AddEnvelopes") <= 0));
+		applied.Should().Equal(db.Database.GetMigrations().TakeWhile(x => string.CompareOrdinal(x, "20261119000000_AddItemUnitAndPaperlessSource") <= 0));
 		int legacyEvidenceIndex = Array.IndexOf(applied, legacyEvidenceMigration);
 		legacyEvidenceIndex.Should().BeGreaterThan(0);
 		int mappingIndex = Array.IndexOf(applied, "20261026102840_AddApprovedCategoryMappings");

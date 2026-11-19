@@ -150,7 +150,7 @@ public sealed partial class ClassificationTests
 	[InlineData(true)]
 	public async Task ArchiveAcceptanceSourceMigrationDowngradeBoundary(bool retainedAudit)
 	{
-		var isolated = new PostgresFixture("20261030134404_AddEnvelopes"); await isolated.InitializeAsync();
+		var isolated = new PostgresFixture("20261119000000_AddItemUnitAndPaperlessSource"); await isolated.InitializeAsync();
 		try { await new ClassificationTests(isolated).AcceptanceSourceDowngrade(retainedAudit); }
 		finally { await isolated.DisposeAsync(); }
 	}
