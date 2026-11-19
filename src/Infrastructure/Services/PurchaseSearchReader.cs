@@ -155,10 +155,11 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			CategoryReportBucket bucket = Resolve(x.AssignmentCategoryId, x.AssignmentRevisionId,
 							x.HasAssignment, x.IsUnresolvedLegacy, x.BeforeMigrationHistory);
 			return new PurchaseSearchItem(
-		x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
-		x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity, x.UnitOfMeasure,
-		x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
-							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview")
+			x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
+			x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity,
+			x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
+							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview",
+							x.UnitOfMeasure)
 			{
 				CategoryId = bucket.CategoryId,
 				PathRevisionId = bucket.PathRevisionId,
