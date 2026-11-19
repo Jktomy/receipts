@@ -50,6 +50,37 @@ function normalizeDescription(v) {
 const allowedAdjustments = new Set(["tip", "discount", "rounding", "loyaltyRedemption", "coupon", "storeCredit", "other"]);
 const debitAdjustments = new Set(["discount", "loyaltyRedemption", "coupon", "storeCredit"]);
 
+export const canonicalUnits = new Set(["each", "count", "g", "kg", "oz", "lb", "ml", "l", "fl_oz", "cup", "pt", "qt", "gal"]);
+
+const unitAliases = {
+  each: "each", ea: "each",
+  count: "count", ct: "count",
+  g: "g", gram: "g", grams: "g",
+  kg: "kg", kilo: "kg", kilos: "kg", kilogram: "kg", kilograms: "kg",
+  oz: "oz", ounce: "oz", ounces: "oz",
+  lb: "lb", lbs: "lb", pound: "lb", pounds: "lb",
+  ml: "ml", milliliter: "ml", milliliters: "ml", millilitre: "ml", millilitres: "ml",
+  l: "l", liter: "l", liters: "l", litre: "l", litres: "l",
+  fl_oz: "fl_oz", floz: "fl_oz",
+  cup: "cup", cups: "cup",
+  pt: "pt", pint: "pt", pints: "pt",
+  qt: "qt", quart: "qt", quarts: "qt",
+  gal: "gal", gallon: "gal", gallons: "gal"
+};
+
+/**
+ * Normalize an OCR/model unit spelling to the canonical catalog.
+ * Returns the canonical unit, null when absent, or undefined when the
+ * spelling is not recognized (caller must then require review, never guess).
+ */
+export function normalizeUnit(raw) {
+  if (raw === undefined || raw === null) return null;
+  const key = String(raw).trim().toLowerCase().replace(/[.]+$/, "");
+  if (key === "") return null;
+  if (canonicalUnits.has(key)) return key;
+  return unitAliases[key];
+}
+
 /**
  * Persist only the defined purchase fields. Model responses and operator
  * corrections are not allowed to introduce account numbers, narrative notes,
@@ -74,7 +105,8 @@ export function sanitizePurchaseDraft(raw) {
       description: pick(item?.description, 200), sku: pick(item?.sku, 80),
       evidence: pick(item?.evidence, 300),
       quantity: pick(item?.quantity ?? "1", 30),
-      unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30)
+      unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30),
+      unit: pick(item?.unit, 16)
     })) : [],
     adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
       type: pick(adjustment?.type, 30), amount: pick(adjustment?.amount, 30),
@@ -124,7 +156,11 @@ export function qualifyItemization(raw, ocrText) {
       problems.push("Item lacks verbatim source evidence");
     }
     const code = typeof rawItem?.sku === "string" ? rawItem.sku.slice(0, 80) : null;
-    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code });
+    const unitOfMeasure = normalizeUnit(rawItem?.unit);
+    if (rawItem?.unit !== undefined && rawItem?.unit !== null && String(rawItem.unit).trim() !== "" && unitOfMeasure === undefined) {
+      problems.push("Unit needs review");
+    }
+    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code, unitOfMeasure });
     subtotal += extended;
   }
   const adjustments = [];
@@ -164,7 +200,8 @@ export function toCompleteReceiptRequest(qualified, instance, paperlessId) {
   if (!qualified.ok) throw new Error("Unqualified receipt cannot be imported");
   return {
     clientRequestId: stableSourceRequestId(instance, paperlessId),
-    receipt: qualified.receipt, items: qualified.items,
+    receipt: { ...qualified.receipt, sourcePaperlessDocumentId: paperlessId },
+    items: qualified.items.map(item => ({ ...item })),
     adjustments: qualified.adjustments,
     transactions: [] // The existing Midas writer remains authoritative for Firefly.
   };
@@ -258,6 +295,22 @@ export async function importQualifiedReceipt(fetcher, config, qualified, paperle
   return { receiptId: result.receipt.id, sourceRequestId: payload.clientRequestId };
 }
 
+function requireHttpUrl(value, name) {
+  const url = new URL(value);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash || url.search) {
+    throw new Error("Invalid configured URL for " + name);
+  }
+  return url;
+}
+async function jsonResponse(response, service) {
+  if (!response.ok) throw new Error(service + " returned HTTP " + response.status);
+  const contentLength = Number(response.headers?.get?.("content-length") ?? "0");
+  if (contentLength > 1000000) throw new Error(service + " response too large");
+  const text = await response.text();
+  if (text.length > 1000000) throw new Error(service + " response too large");
+  return JSON.parse(text);
+}
+
 export async function getFireflyWithdrawals(fetcher, config, start, end) {
   if (!acceptedDate(start) || !acceptedDate(end) || end < start) throw new Error("Invalid Firefly date range");
   let url = apiUrl(config.fireflyUrl, "/api/v1/transactions?start=" + start + "&end=" + end + "&type=withdrawal&limit=100");
@@ -287,7 +340,7 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
 }
 
 export function suggestFireflyLink(qualified, paperlessId, fireflySourceAccountId, snapshot) {
-  if (!qualified?.ok) return { status: "REVIEW", reason: "Receipt needs source review" };
+  if (!qualified?.ok) return { status: "REVIEW", reason: "Source account mapping not reviewed" };
   if (!fireflySourceAccountId) return { status: "REVIEW", reason: "Source account mapping not reviewed" };
   const result = matchReceiptPurchases([{
     receiptId: "paperless:" + paperlessId,
