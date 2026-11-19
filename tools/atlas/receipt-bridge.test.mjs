@@ -515,3 +515,30 @@ test("post-import OCR change voids the confirmed link", async () => {
     assert.equal(calls.filter(c=>c.host==="receipts.test").length, 1);
   }, { fireflyPages: pages });
 });
+test("blocked import approval voids the stale payment link", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, setDocument}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
+    const blocked = await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(blocked.status, 409);
+    assert.equal(bridge.state(44).confirmedFireflyTransactionId, null);
+    assert.equal(bridge.state(44).status, "SOURCE_CHANGED_REVIEW");
+  }, { fireflyPages: pages });
+});
+test("blocked payment match voids the stale stored link", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, setDocument}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
+    const blocked = await http(url+"/drafts/44/match","POST",{fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(blocked.status, 409);
+    assert.equal(bridge.state(44).confirmedFireflyTransactionId, null);
+  }, { fireflyPages: pages });
+});

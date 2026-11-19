@@ -158,7 +158,9 @@ follow-up source change requiring review.
   approval. An import attempted after the OCR changed is rejected
   with 409 until the draft is corrected and saved again.
 - POST /drafts/{paperlessId}/match — operator token; provide a reviewed
-  fireflySourceAccountId, return read-only Firefly candidate IDs
+  fireflySourceAccountId, return read-only Firefly candidate IDs.
+  A source change detected here blocks the match and voids any stored
+  confirmation, same as the import path.
 - POST /drafts/{paperlessId}/confirm-match — operator token; provide the
   suggested fireflyTransactionId plus fireflySourceAccountId. Stored only when
   it still equals the current unique PROPOSED_MATCH; rejected with 409

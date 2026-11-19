@@ -168,7 +168,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     try {
       const current = await getPaperlessText(fetcher, config, id);
       if (current.contentHash !== saved.contentHash) {
-        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import" });
+        // The checked source is gone: block the import and void any payment
+        // confirmation checked against the old revision.
+        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import", confirmedFireflyTransactionId: null, confirmedAt: null });
         return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
       }
       const qualified = qualifyItemization(saved.draft, current.content);
@@ -185,7 +187,12 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     const saved = getState(dataDir, id);
     if (!saved?.draft || !saved?.contentHash) return { status: 404, result: { error: "Draft not found" } };
     const current = await getPaperlessText(fetcher, config, id);
-    if (current.contentHash !== saved.contentHash) return { status: 409, result: { error: "OCR source revision changed" } };
+    if (current.contentHash !== saved.contentHash) {
+      // The checked source is gone: block the match and void any payment
+      // confirmation checked against the old revision.
+      setState(dataDir, id, { ...saved, confirmedFireflyTransactionId: null, confirmedAt: null });
+      return { status: 409, result: { error: "OCR source revision changed" } };
+    }
     const qualified = qualifyItemization(saved.draft, current.content);
     if (!qualified.ok) return { status: 422, result: { error: "Receipt is not yet reviewed" } };
     if (!config.fireflyToken || !config.fireflyUrl) return { status: 503, result: { error: "Firefly read-only access not configured" } };
