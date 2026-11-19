@@ -64,6 +64,7 @@ interface ReceiptItem {
   description: string;
   quantity: number;
   unitPrice: number;
+  unitOfMeasure?: string | null;
   currentClassification?: CurrentClassification | null;
   normalizedDescriptionName?: string | null;
   normalizationRevision?: string;
@@ -248,7 +249,7 @@ export function ReceiptItemsCard({
                 value={occasionId}
                 disabled={choicesBusy}
                 onChange={(next) =>
-                  setReceiptChoices.mutate({
+                  setItemChoices.mutate({
                     receiptId,
                     paidFromEnvelopeId,
                     occasionId: next,
@@ -355,6 +356,7 @@ export function ReceiptItemsCard({
                       </TableCell>
                       <TableCell className="text-right">
                         {item.quantity}
+                        {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatUnitPrice(item.unitPrice)}
