@@ -83,7 +83,6 @@ public static class UnitCatalog
 		string? unitOfMeasure,
 		out decimal amountPerCanonicalUnit,
 		out string canonicalUnit)
-	{
 		=> TryGetComparableUnitPrice(quantity, unitPrice, unitOfMeasure, null, null,
 			out amountPerCanonicalUnit, out canonicalUnit);
 

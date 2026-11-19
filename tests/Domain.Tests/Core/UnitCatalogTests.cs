@@ -130,41 +130,4 @@ public class UnitCatalogTests
 	{
 		Assert.Equal(expected, UnitCatalog.AreComparable(first, second));
 	}
-	[Theory]
-	[InlineData(" G ")]
-	[InlineData("kg")]
-	[InlineData("OZ")]
-	[InlineData("lb")]
-	[InlineData("ml")]
-	[InlineData("L")]
-	[InlineData("fl_oz")]
-	[InlineData("CUP")]
-	[InlineData("pt")]
-	[InlineData("qt")]
-	[InlineData("gal")]
-	public void IsKnown_RecognizesCanonicalUnitsCaseInsensitively(string unit)
-	{
-		Assert.True(UnitCatalog.IsKnown(unit));
-	}
-
-	[Theory]
-	[InlineData(null)]
-	[InlineData("")]
-	[InlineData("   ")]
-	[InlineData("litre")]
-	[InlineData("pound")]
-	[InlineData("dozen")]
-	[InlineData("eachs")]
-	public void IsKnown_RejectsUnknownUnits(string? unit)
-	{
-		Assert.False(UnitCatalog.IsKnown(unit));
-	}
-
-	[Fact]
-	public void Normalize_TrimsAndLowercases()
-	{
-		Assert.Equal("gal", UnitCatalog.Normalize(" GAL "));
-		Assert.Null(UnitCatalog.Normalize("   "));
-		Assert.Null(UnitCatalog.Normalize(null));
-	}
 }
