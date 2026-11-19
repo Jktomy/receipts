@@ -140,14 +140,20 @@ follow-up source change requiring review.
   naming the revision edited (compare-and-swap): a stale save is rejected with
   409 instead of silently overwriting another reviewer's corrections. Returns
   the new draftRevision and marks the draft reviewer-edited; a later OCR change
-  then preserves these corrections instead of silently replacing them.
+  then preserves these corrections instead of silently replacing them. A save
+  clears any prior payment confirmation (confirmationInvalidated) because the
+  confirmed link described the pre-edit draft.
 - POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create.
   Requires { "expectedRevision" }: the approver names the exact draft revision
   reviewed, and a stale approval is rejected with 409 instead of importing a
   newer draft. There is no silent legacy path: an approval without a named
   revision is rejected with 400. Concurrent approvals are serialized; the
   second sees the recorded receiptId (idempotent replay), never a duplicate
-  purchase. An import attempted after the OCR changed is rejected
+  purchase. Saving corrections (PUT) clears any prior payment confirmation and
+  reports confirmationInvalidated, and a post-review OCR change driving the
+  draft to SOURCE_CHANGED_REVIEW clears it as well: the link was checked
+  against the old draft or source, so the reviewer must re-check before
+  approval. An import attempted after the OCR changed is rejected
   with 409 until the draft is corrected and saved again.
 - POST /drafts/{paperlessId}/match — operator token; provide a reviewed
   fireflySourceAccountId, return read-only Firefly candidate IDs

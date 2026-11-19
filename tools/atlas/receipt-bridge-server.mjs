@@ -105,12 +105,15 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (previous?.draft && previous?.reviewerEdited) {
         // OCR changed after a reviewer corrected the draft: keep the corrections and
         // force re-review against the new text instead of silently replacing them.
+        // Any payment confirmation is void: it was checked against the old source.
         setState(dataDir, id, {
           ...previous,
           contentHash: source.contentHash,
           modified: source.modified,
           status: "SOURCE_CHANGED_REVIEW",
-          reason: "Paperless OCR text changed after review: saved corrections need re-check"
+          reason: "Paperless OCR text changed after review: saved corrections need re-check",
+          confirmedFireflyTransactionId: null,
+          confirmedAt: null
         });
         return;
       }
@@ -296,8 +299,11 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         }
         const draftRevision = (previous.draftRevision ?? 0) + 1;
         // Still checked against immutable OCR evidence at import time.
-        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [], reviewerEdited: true, draftRevision });
-        return safeJson(response, 200, { status: "DRAFT_UPDATED", draftRevision });
+        // Any edit voids a prior payment confirmation: it was checked against
+        // the pre-edit draft, so the reviewer must re-check before approval.
+        const confirmationInvalidated = previous.confirmedFireflyTransactionId != null;
+        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [], reviewerEdited: true, draftRevision, confirmedFireflyTransactionId: null, confirmedAt: null });
+        return safeJson(response, 200, { status: "DRAFT_UPDATED", draftRevision, confirmationInvalidated });
       }
       if (request.method === "POST" && match[2] === "import") {
         // Explicit revision required: the approver must name the exact draft

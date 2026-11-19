@@ -461,3 +461,38 @@ test("package content validates: measurable per package, countable unit", () => 
   const half = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"64"}]};
   assert.ok(qualifyItemization(half, ocr).problems.includes("Package content unit requires review"));
 });
+test("editing a confirmed draft voids the payment confirmation", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    assert.equal(bridge.state(44).confirmedFireflyTransactionId, "31");
+    const edited = { ...bridge.state(44).draft, merchant: "H-E-B Plus", expectedRevision: bridge.state(44).draftRevision };
+    const saved = await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).confirmationInvalidated, true);
+    assert.equal(bridge.state(44).confirmedFireflyTransactionId, null);
+    const reread = await http(url+"/drafts/44","GET",null,"x-atlas-operator-key",config.operatorSecret);
+    assert.equal((await reread.json()).confirmedFireflyTransactionId, null);
+  }, { fireflyPages: pages });
+});
+test("OCR change after confirmation forces re-review without the old link", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, setDocument}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    // Description-only edit: reviewerEdited without disturbing the payment match.
+    const items = [{ ...bridge.state(44).draft.items[0], description: "Milk 2 percent" }, bridge.state(44).draft.items[1]];
+    const edited = { ...bridge.state(44).draft, items, expectedRevision: bridge.state(44).draftRevision };
+    await http(url+"/drafts/44","PUT",edited,"x-atlas-operator-key",config.operatorSecret);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
+    await bridge.processDocument(44);
+    const kept = bridge.state(44);
+    assert.equal(kept.status, "SOURCE_CHANGED_REVIEW");
+    assert.equal(kept.confirmedFireflyTransactionId, null);
+  }, { fireflyPages: pages });
+});

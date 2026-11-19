@@ -172,8 +172,11 @@ export default function PaperlessInbox() {
     setBusy(true); setError(undefined);
     try {
       // Compare-and-swap: name the revision edited so a concurrent reviewer save is rejected, not silently lost.
-      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}`, "PUT", { ...draft, expectedRevision: selected.draftRevision });
-      setDirty(false); setMessage("Corrections saved. Re-run import validation before approval.");
+      const saved = await atlasApi<{ status: string; draftRevision: number; confirmationInvalidated?: boolean }>(`/api/atlas/paperless/drafts/${selected.paperlessId}`, "PUT", { ...draft, expectedRevision: selected.draftRevision });
+      setDirty(false);
+      setMessage(saved.confirmationInvalidated
+        ? "Corrections saved; the previous payment link was cleared because the draft changed. Re-check before approval."
+        : "Corrections saved. Re-run import validation before approval.");
       const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
       setSelected(state);
       await refresh();

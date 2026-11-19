@@ -84,7 +84,9 @@ function installBridge(state: BridgeState, matchStatus = "UNMATCHED") {
         ) {
           state.rev += 1;
           state.lastPut = body;
-          return json({ status: "DRAFT_UPDATED", draftRevision: state.rev });
+          const invalidated = state.confirmed != null;
+          state.confirmed = null;
+          return json({ status: "DRAFT_UPDATED", draftRevision: state.rev, confirmationInvalidated: invalidated });
         }
         if (url.endsWith("/api/atlas/paperless/drafts/44/import")) {
           state.lastImport = body;
@@ -270,6 +272,25 @@ describe("PaperlessInbox", () => {
       expect(screen.getByText(/Imported to Receipts/)).toBeInTheDocument(),
     );
     expect(state.lastImport).toEqual({ expectedRevision: 3 });
+  });
+
+  it("clears the confirmed payment link when corrections are saved", async () => {
+    const state: BridgeState = {
+      rev: 1,
+      confirmed: "31",
+      lastPut: null,
+      lastImport: null,
+      lastConfirm: null,
+    };
+    installBridge(state, "PROPOSED_MATCH");
+    const user = await openDraft();
+    expect(screen.getByText(/Confirmed payment: Firefly transaction #31/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Item 1 unit"), "gal");
+    await user.click(screen.getByRole("button", { name: "Save corrections" }));
+    await waitFor(() =>
+      expect(screen.getByText(/previous payment link was cleared/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Confirmed payment: Firefly transaction #31/)).not.toBeInTheDocument();
   });
 
   it("shows neutral wording when no payment is linked", async () => {
