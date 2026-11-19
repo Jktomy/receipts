@@ -55,7 +55,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 		if (options.CategoryId is Guid filterId)
 		{
 			IQueryable<TaxonomyNodeEntity> eligible = EligibleCategoryNodes(context, filterId,
-				options.CategoryView == CategoryReportView.CurrentHierarchy ? head : null);
+					options.CategoryView == CategoryReportView.CurrentHierarchy ? head : null);
 			bool historical = options.CategoryView == CategoryReportView.AsClassified;
 			purchases = purchases.Where(row => row.Assignment != null
 					&& row.Assignment.CategoryId.HasValue
