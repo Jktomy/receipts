@@ -295,22 +295,6 @@ export async function importQualifiedReceipt(fetcher, config, qualified, paperle
   return { receiptId: result.receipt.id, sourceRequestId: payload.clientRequestId };
 }
 
-function requireHttpUrl(value, name) {
-  const url = new URL(value);
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash || url.search) {
-    throw new Error("Invalid configured URL for " + name);
-  }
-  return url;
-}
-async function jsonResponse(response, service) {
-  if (!response.ok) throw new Error(service + " returned HTTP " + response.status);
-  const contentLength = Number(response.headers?.get?.("content-length") ?? "0");
-  if (contentLength > 1000000) throw new Error(service + " response too large");
-  const text = await response.text();
-  if (text.length > 1000000) throw new Error(service + " response too large");
-  return JSON.parse(text);
-}
-
 export async function getFireflyWithdrawals(fetcher, config, start, end) {
   if (!acceptedDate(start) || !acceptedDate(end) || end < start) throw new Error("Invalid Firefly date range");
   let url = apiUrl(config.fireflyUrl, "/api/v1/transactions?start=" + start + "&end=" + end + "&type=withdrawal&limit=100");
@@ -340,7 +324,7 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
 }
 
 export function suggestFireflyLink(qualified, paperlessId, fireflySourceAccountId, snapshot) {
-  if (!qualified?.ok) return { status: "REVIEW", reason: "Source account mapping not reviewed" };
+  if (!qualified?.ok) return { status: "REVIEW", reason: "Receipt needs source review" };
   if (!fireflySourceAccountId) return { status: "REVIEW", reason: "Source account mapping not reviewed" };
   const result = matchReceiptPurchases([{
     receiptId: "paperless:" + paperlessId,
