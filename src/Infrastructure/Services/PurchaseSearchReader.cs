@@ -19,16 +19,16 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 				? await context.TaxonomyHeads.AsNoTracking().Where(row => row.Id == 1)
 						.Select(row => (Guid?)row.RevisionId).SingleOrDefaultAsync(cancellationToken) : null);
 		if (options.CapturedCurrentRevisionId.HasValue
-			&& !await context.TaxonomyRevisions.AsNoTracking().AnyAsync(row => row.Id == head, cancellationToken))
+				&& !await context.TaxonomyRevisions.AsNoTracking().AnyAsync(row => row.Id == head, cancellationToken))
 		{ throw new ArgumentException("capturedCurrentRevisionId does not identify a taxonomy revision", nameof(options.CapturedCurrentRevisionId)); }
 		IQueryable<PurchaseClassificationEntity> assignments = context.Classifications.AsNoTracking().Where(assignment =>
 				cutoff.HasValue
 						? assignment.RecordedAt <= cutoff.Value
-							&& !context.Classifications.Any(later => later.ReceiptItemId == assignment.ReceiptItemId
-								&& later.RecordedAt <= cutoff.Value
-								&& (later.RecordedAt > assignment.RecordedAt
-										|| later.RecordedAt == assignment.RecordedAt && later.Sequence > assignment.Sequence))
-					: context.CurrentClassifications.Any(pointer => pointer.ReceiptItemId == assignment.ReceiptItemId
+								&& !context.Classifications.Any(later => later.ReceiptItemId == assignment.ReceiptItemId
+										&& later.RecordedAt <= cutoff.Value
+										&& (later.RecordedAt > assignment.RecordedAt
+												|| later.RecordedAt == assignment.RecordedAt && later.Sequence > assignment.Sequence))
+						: context.CurrentClassifications.Any(pointer => pointer.ReceiptItemId == assignment.ReceiptItemId
 							&& pointer.AssignmentId == assignment.Id));
 		string pattern = LiteralPattern(query);
 		var purchases =
@@ -44,8 +44,8 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			from assignment in assignmentGroup.DefaultIfEmpty()
 			where query == "" || EF.Functions.ILike(item.Description, pattern, @"\")
 								|| (item.ReceiptItemCode != null && EF.Functions.ILike(item.ReceiptItemCode!, pattern, @"\"))
-			|| EF.Functions.ILike(receipt.Location, pattern, @"\")
-			|| (canonical != null
+				|| EF.Functions.ILike(receipt.Location, pattern, @"\")
+				|| (canonical != null
 					&& item.NormalizationReviewState != NormalizationReviewState.Excluded
 					&& (options.IncludeUnreviewed || item.NormalizationReviewState == NormalizationReviewState.Verified)
 					&& (EF.Functions.ILike(canonical.CanonicalName, pattern, @"\")
@@ -61,9 +61,9 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 					&& row.Assignment.CategoryId.HasValue
 					&& row.Assignment.LegacyResolution != "unresolved_path"
 					&& !context.LegacyMigrationItems.Any(evidence => evidence.AssignmentId == row.Assignment.Id
-						&& evidence.Resolution == "Unresolved")
+							&& evidence.Resolution == "Unresolved")
 					&& eligible.Any(node => node.CategoryId == row.Assignment.CategoryId
-						&& (!historical || node.RevisionId == row.Assignment.TaxonomyRevisionId)));
+							&& (!historical || node.RevisionId == row.Assignment.TaxonomyRevisionId)));
 		}
 
 		if (options.NormalizedDescriptionId.HasValue)
@@ -109,41 +109,41 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			_ => throw new ArgumentOutOfRangeException(nameof(options), "Unsupported purchase sort column."),
 		};
 		var rows = await ordered
-		.ThenBy(x => x.Receipt.Id).ThenBy(x => x.Item.Id)
-		.Skip(offset).Take(limit)
-		.Select(x => new
-		{
-			x.Item.Id,
-			x.Item.ReceiptId,
-			x.Receipt.Date,
-			x.Receipt.Location,
-			x.Item.Description,
-			x.Item.ReceiptItemCode,
-			NormalizedDescriptionId = x.Canonical == null || x.Item.NormalizationReviewState == NormalizationReviewState.Excluded || (!options.IncludeUnreviewed && x.Item.NormalizationReviewState != NormalizationReviewState.Verified) ? (Guid?)null : x.Canonical.Id,
-			NormalizationReviewState = x.Item.NormalizationReviewState,
-			NormalizedDescription = x.Canonical == null || x.Item.NormalizationReviewState == NormalizationReviewState.Excluded || (!options.IncludeUnreviewed && x.Item.NormalizationReviewState != NormalizationReviewState.Verified) ? null
-				: string.IsNullOrEmpty(x.Canonical.DisplayLabel) ? x.Canonical.CanonicalName : x.Canonical.DisplayLabel,
-			x.Item.Quantity,
-			x.Item.UnitOfMeasure,
-			x.Item.UnitPrice,
-			x.Item.UnitPriceCurrency,
-			x.Item.TotalAmount,
-			x.Item.TotalAmountCurrency,
-			AssignmentCategoryId = x.Assignment == null ? (Guid?)null : x.Assignment.CategoryId,
-			AssignmentRevisionId = x.Assignment == null ? (Guid?)null : x.Assignment.TaxonomyRevisionId,
-			HasAssignment = x.Assignment != null,
-			IsUnresolvedLegacy = x.Assignment != null && (x.Assignment.LegacyResolution == "unresolved_path"
-							|| context.LegacyMigrationItems.Any(evidence => evidence.AssignmentId == x.Assignment.Id
+	.ThenBy(x => x.Receipt.Id).ThenBy(x => x.Item.Id)
+	.Skip(offset).Take(limit)
+	.Select(x => new
+	{
+		x.Item.Id,
+		x.Item.ReceiptId,
+		x.Receipt.Date,
+		x.Receipt.Location,
+		x.Item.Description,
+		x.Item.ReceiptItemCode,
+		NormalizedDescriptionId = x.Canonical == null || x.Item.NormalizationReviewState == NormalizationReviewState.Excluded || (!options.IncludeUnreviewed && x.Item.NormalizationReviewState != NormalizationReviewState.Verified) ? (Guid?)null : x.Canonical.Id,
+		NormalizationReviewState = x.Item.NormalizationReviewState,
+		NormalizedDescription = x.Canonical == null || x.Item.NormalizationReviewState == NormalizationReviewState.Excluded || (!options.IncludeUnreviewed && x.Item.NormalizationReviewState != NormalizationReviewState.Verified) ? null
+			: string.IsNullOrEmpty(x.Canonical.DisplayLabel) ? x.Canonical.CanonicalName : x.Canonical.DisplayLabel,
+		x.Item.Quantity,
+		x.Item.UnitOfMeasure,
+		x.Item.UnitPrice,
+		x.Item.UnitPriceCurrency,
+		x.Item.TotalAmount,
+		x.Item.TotalAmountCurrency,
+		AssignmentCategoryId = x.Assignment == null ? (Guid?)null : x.Assignment.CategoryId,
+		AssignmentRevisionId = x.Assignment == null ? (Guid?)null : x.Assignment.TaxonomyRevisionId,
+		HasAssignment = x.Assignment != null,
+		IsUnresolvedLegacy = x.Assignment != null && (x.Assignment.LegacyResolution == "unresolved_path"
+						|| context.LegacyMigrationItems.Any(evidence => evidence.AssignmentId == x.Assignment.Id
 								&& evidence.Resolution == "Unresolved")),
-			BeforeMigrationHistory = cutoff.HasValue && x.Assignment == null
+		BeforeMigrationHistory = cutoff.HasValue && x.Assignment == null
 						&& context.Classifications.Any(history => history.ReceiptItemId == x.Item.Id
-							&& history.Source == "legacy_import" && history.RecordedAt > cutoff.Value),
-		}).ToListAsync(cancellationToken);
+								&& history.Source == "legacy_import" && history.RecordedAt > cutoff.Value),
+	}).ToListAsync(cancellationToken);
 
 		Guid[] pageRevisions = options.CategoryView == CategoryReportView.CurrentHierarchy
-			? head.HasValue ? [head.Value] : []
-			: rows.Where(row => row.AssignmentCategoryId.HasValue && row.AssignmentRevisionId.HasValue)
-					.Select(row => row.AssignmentRevisionId!.Value).Distinct().ToArray();
+				? head.HasValue ? [head.Value] : []
+				: rows.Where(row => row.AssignmentCategoryId.HasValue && row.AssignmentRevisionId.HasValue)
+						.Select(row => row.AssignmentRevisionId!.Value).Distinct().ToArray();
 		var nodes = await context.TaxonomyNodes.AsNoTracking().Where(node => pageRevisions.Contains(node.RevisionId))
 				.Select(node => new { node.RevisionId, node.CategoryId, node.ParentId, node.Name, node.Archived })
 				.ToListAsync(cancellationToken);
@@ -155,9 +155,9 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			CategoryReportBucket bucket = Resolve(x.AssignmentCategoryId, x.AssignmentRevisionId,
 							x.HasAssignment, x.IsUnresolvedLegacy, x.BeforeMigrationHistory);
 			return new PurchaseSearchItem(
-				x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
-				x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity, x.UnitOfMeasure,
-				x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
+		x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
+		x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity, x.UnitOfMeasure,
+		x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
 							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview")
 			{
 				CategoryId = bucket.CategoryId,
@@ -175,7 +175,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 		};
 
 		CategoryReportBucket Resolve(Guid? categoryId, Guid? revisionId, bool hasAssignment,
-			bool unresolvedLegacy, bool beforeMigration)
+				bool unresolvedLegacy, bool beforeMigration)
 		{
 			CategoryReportState state = !hasAssignment ? beforeMigration ? CategoryReportState.BeforeMigrationHistory
 							: CategoryReportState.MissingAssignment
@@ -214,8 +214,8 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
                             SELECT DISTINCT "RevisionId" FROM ancestors WHERE "ParentId" IS NULL
                         ), descendants AS (
                             SELECT n."RevisionId", n."CategoryId", ARRAY[n."CategoryId"] AS path
-                            FROM descendants
-                            JOIN valid_revisions AS valid ON valid."RevisionId" = descendants."RevisionId"
+                            FROM taxonomy."Nodes" AS n
+                            JOIN valid_revisions AS valid ON valid."RevisionId" = n."RevisionId"
                             WHERE n."CategoryId" = {categoryId}
                             UNION ALL
                             SELECT child."RevisionId", child."CategoryId",
