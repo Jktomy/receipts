@@ -32,6 +32,7 @@ public class ReceiptItemEntity : ISoftDeletable, IOwnedBy<ReceiptEntity>
 	public string? ReceiptItemCode { get; set; }
 	public string Description { get; set; } = string.Empty;
 	public decimal Quantity { get; set; }
+	public string? UnitOfMeasure { get; set; }
 	public decimal UnitPrice { get; set; }
 	public Currency UnitPriceCurrency { get; set; }
 	public decimal TotalAmount { get; set; }
