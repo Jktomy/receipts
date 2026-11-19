@@ -29,7 +29,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 										&& (later.RecordedAt > assignment.RecordedAt
 												|| later.RecordedAt == assignment.RecordedAt && later.Sequence > assignment.Sequence))
 						: context.CurrentClassifications.Any(pointer => pointer.ReceiptItemId == assignment.ReceiptItemId
-							&& pointer.AssignmentId == assignment.Id));
+								&& pointer.AssignmentId == assignment.Id));
 		string pattern = LiteralPattern(query);
 		var purchases =
 			from item in context.ReceiptItems.IgnoreAutoIncludes().AsNoTracking()
@@ -55,7 +55,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 		if (options.CategoryId is Guid filterId)
 		{
 			IQueryable<TaxonomyNodeEntity> eligible = EligibleCategoryNodes(context, filterId,
-				options.CategoryView == CategoryReportView.CurrentHierarchy ? head : null);
+					options.CategoryView == CategoryReportView.CurrentHierarchy ? head : null);
 			bool historical = options.CategoryView == CategoryReportView.AsClassified;
 			purchases = purchases.Where(row => row.Assignment != null
 					&& row.Assignment.CategoryId.HasValue
@@ -194,7 +194,7 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 	// The second walks its subtree. Both use stable IDs and guard against corrupt cycles.
 	// Keeping this as a composable relation lets PostgreSQL filter before count and paging.
 	internal static IQueryable<TaxonomyNodeEntity> EligibleCategoryNodes(
-		ApplicationDbContext context, Guid categoryId, Guid? revisionId)
+			ApplicationDbContext context, Guid categoryId, Guid? revisionId)
 		=> context.TaxonomyNodes.FromSqlInterpolated($"""
                         WITH RECURSIVE ancestors AS (
                             SELECT n."RevisionId", n."CategoryId", n."ParentId",
