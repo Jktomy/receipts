@@ -97,14 +97,20 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 	[HttpPost("drafts/{id:int}/import")]
 	public async Task<IActionResult> Import(int id, CancellationToken ct)
 	{
-		if (id <= 0) return BadRequest(new { error = "Invalid document ID" });
+		if (id <= 0)
+		{
+			return BadRequest(new { error = "Invalid document ID" });
+		}
 		string payload;
 		using (var reader = new System.IO.StreamReader(Request.Body))
 		{
 			payload = await reader.ReadToEndAsync(ct);
 		}
 		// Forward the reviewer client revision when present; empty bodies keep legacy behavior.
-		if (string.IsNullOrWhiteSpace(payload)) payload = "{}";
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			payload = "{}";
+		}
 		return await Forward(HttpMethod.Post, $"drafts/{id}/import", payload, ct);
 	}
 
