@@ -151,7 +151,9 @@ follow-up source change requiring review.
   second sees the recorded receiptId (idempotent replay), never a duplicate
   purchase. Saving corrections (PUT) clears any prior payment confirmation and
   reports confirmationInvalidated, and a post-review OCR change driving the
-  draft to SOURCE_CHANGED_REVIEW clears it as well: the link was checked
+  draft to SOURCE_CHANGED_REVIEW clears it as well — including after an import
+  has already recorded the receipt (the imported record stands, but the bridge
+  no longer presents the old source as confirmed): the link was checked
   against the old draft or source, so the reviewer must re-check before
   approval. An import attempted after the OCR changed is rejected
   with 409 until the draft is corrected and saved again.

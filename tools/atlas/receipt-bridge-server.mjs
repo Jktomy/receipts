@@ -94,7 +94,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (previous?.receiptId) {
         const state = source.contentHash === previous.contentHash
           ? { ...previous, status: "IMPORTED" }
-          : { ...previous, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless OCR text changed after import" };
+          // Source changed after import: force re-review and void the payment
+          // confirmation, which described the pre-change source and draft.
+          : { ...previous, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless OCR text changed after import: re-check before relying on the link", confirmedFireflyTransactionId: null, confirmedAt: null };
         setState(dataDir, id, state);
         return;
       }

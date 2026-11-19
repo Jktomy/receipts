@@ -496,3 +496,22 @@ test("OCR change after confirmation forces re-review without the old link", asyn
     assert.equal(kept.confirmedFireflyTransactionId, null);
   }, { fireflyPages: pages });
 });
+test("post-import OCR change voids the confirmed link", async () => {
+  const pages = [{ data: [fireflyOne], links: { next: null } }];
+  await exerciseBridge(async ({url, bridge, setDocument, calls}) => {
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    const confirmed = await http(url+"/drafts/44/confirm-match","POST",{fireflyTransactionId:"31",fireflySourceAccountId:"9"},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(confirmed.status, 200);
+    const imported = await http(url+"/drafts/44/import","POST",{expectedRevision:1},"x-atlas-operator-key",config.operatorSecret);
+    assert.equal(imported.status, 200);
+    assert.equal(bridge.state(44).confirmedFireflyTransactionId, "31");
+    setDocument({ content: ocr+"\nADDITIONAL CHARGE 3.00" });
+    await bridge.processDocument(44);
+    const kept = bridge.state(44);
+    assert.equal(kept.status, "SOURCE_CHANGED_REVIEW");
+    assert.equal(kept.receiptId, "receipts-101");
+    assert.equal(kept.confirmedFireflyTransactionId, null);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length, 1);
+  }, { fireflyPages: pages });
+});
