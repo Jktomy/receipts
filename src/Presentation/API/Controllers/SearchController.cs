@@ -24,20 +24,20 @@ public class SearchController(IMediator mediator) : ControllerBase
 		[FromQuery] string? q,
 		CancellationToken cancellationToken,
 		[FromQuery] int offset = 0,
-			[FromQuery] int limit = 25,
-			[FromQuery] string sortBy = "date",
-			[FromQuery] string sortDirection = "desc",
-			[FromQuery] string? location = null,
-			[FromQuery] DateOnly? startDate = null,
-			[FromQuery] DateOnly? endDate = null,
-			[FromQuery] decimal? minUnitPrice = null,
-			[FromQuery] decimal? maxUnitPrice = null,
-			[FromQuery] bool includeUnreviewed = false,
-							[FromQuery] Guid? normalizedDescriptionId = null,
-							[FromQuery] string? categoryView = null,
-							[FromQuery] Guid? categoryId = null,
-							[FromQuery] string? knowledgeCutoff = null,
-							[FromQuery] Guid? capturedCurrentRevisionId = null)
+				[FromQuery] int limit = 25,
+				[FromQuery] string sortBy = "date",
+				[FromQuery] string sortDirection = "desc",
+				[FromQuery] string? location = null,
+				[FromQuery] DateOnly? startDate = null,
+				[FromQuery] DateOnly? endDate = null,
+				[FromQuery] decimal? minUnitPrice = null,
+				[FromQuery] decimal? maxUnitPrice = null,
+				[FromQuery] bool includeUnreviewed = false,
+								[FromQuery] Guid? normalizedDescriptionId = null,
+								[FromQuery] string? categoryView = null,
+								[FromQuery] Guid? categoryId = null,
+								[FromQuery] string? knowledgeCutoff = null,
+								[FromQuery] Guid? capturedCurrentRevisionId = null)
 	{
 		CategoryReportView view = categoryView switch
 		{
@@ -50,8 +50,8 @@ public class SearchController(IMediator mediator) : ControllerBase
 		if (knowledgeCutoff is not null)
 		{
 			if (!knowledgeCutoff.EndsWith('Z') || !DateTimeOffset.TryParseExact(knowledgeCutoff,
-				["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'"],
-				CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
+					["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'"],
+					CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
 			{ return ApiProblem.BadRequest("knowledgeCutoff must be an ISO UTC timestamp with a Z suffix"); }
 			cutoff = parsed.ToUniversalTime();
 		}
@@ -63,9 +63,9 @@ public class SearchController(IMediator mediator) : ControllerBase
 		try
 		{
 			result = await mediator.Send(
-new SearchPurchasesQuery(q, offset, limit,
+	new SearchPurchasesQuery(q, offset, limit,
 						new PurchaseSearchOptions(sortBy, sortDirection, location, startDate, endDate, minUnitPrice, maxUnitPrice, includeUnreviewed, normalizedDescriptionId,
-							view, categoryId, cutoff, capturedCurrentRevisionId)),
+								view, categoryId, cutoff, capturedCurrentRevisionId)),
 				cancellationToken);
 		}
 		catch (ArgumentException exception) when (exception.ParamName == "CapturedCurrentRevisionId")
@@ -76,7 +76,7 @@ new SearchPurchasesQuery(q, offset, limit,
 								? PurchaseSearchResponseCategoryView.CurrentHierarchy : PurchaseSearchResponseCategoryView.AsClassified,
 			CurrentRevisionId = result.CurrentRevisionId,
 			KnowledgeCutoff = result.KnowledgeCutoff,
-			AssignmentSelection = result.AssignmentSelection == CategoryReportSelection.LatestRecordedAtOrBeforeCutoff
+			AssignmentSelection = result.AssignmentSelection == CategoryReportAssignmentSelection.LatestRecordedAtOrBeforeCutoff
 								? PurchaseSearchResponseAssignmentSelection.LatestRecordedAtOrBeforeCutoff
 								: PurchaseSearchResponseAssignmentSelection.CurrentPointer,
 			Items = result.Items.Select(x => new PurchaseSearchItem
