@@ -248,9 +248,11 @@ separately built, tested and pinned fork image is deployed.
 The bridge keeps one JSON file per Paperless document in its data directory
 (ATLAS_BRIDGE_DATA_DIR, default ./atlas-receipts-data). To back up: stop only
 the bridge container/service, copy the whole data directory to versioned
-storage, record its file list with SHA-256 hashes. To restore: stop the
-bridge, replace the data directory with the verified copy, re-check hashes,
-restart, then GET /drafts and one known /drafts/{id} and compare
+storage, record its file list with SHA-256 hashes. To restore: first re-verify
+every hash against the manifest and refuse the restore on any mismatch (a
+tampered archive must never reach pg_restore or the data directory); only then
+stop the bridge, replace the data directory with the verified copy, re-check
+hashes, restart, then GET /drafts and one known /drafts/{id} and compare
 status/draftRevision/receiptId/confirmedFireflyTransactionId against the
 recorded values. Never copy production PostgreSQL, Paperless originals or
 secret files as part of this procedure; secrets live only in mounted files.
