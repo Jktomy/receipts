@@ -212,7 +212,6 @@ it("shows historical purchase evidence with precision and a receipt link", () =>
   expect(screen.getByText("Code: MILK-42")).toBeInTheDocument();
   expect(screen.getByText(/Verified product\s*:\s*Milk/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View receipt" })).toHaveAttribute(
-    "href",
     "/receipts/receipt-1",
   );
 });
@@ -268,4 +267,375 @@ it.each(["-1", "nope", "2147483648", "9007199254740993"])(
     );
   },
 );
-PART2_CONTINUES_HERE
+
+it("explains empty search without presenting results", () => {
+  renderPage("/search");
+  expect(
+    screen.getByPlaceholderText("Search item names, codes, or stores"),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("table", { name: "Purchase results" }),
+  ).not.toBeInTheDocument();
+});
+it("shows loading and retryable failures", async () => {
+  search.mockReturnValue(mockQueryResult());
+  const view = renderPage();
+  expect(screen.getByText("Searching purchases…")).toHaveTextContent(
+    "Searching purchases",
+  );
+  const retry = vi.fn();
+  search.mockReturnValue(
+    mockQueryResult({ isPending: false, isError: true, refetch: retry }),
+  );
+  view.rerender(
+    <>
+      <PurchaseSearch />
+      <Location />
+    </>,
+  );
+  expect(
+    screen.getByText("Purchase history could not be loaded."),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+  expect(retry).toHaveBeenCalledOnce();
+});
+it("distinguishes a stale empty page from no matching purchases", async () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [],
+        total: 1,
+        offset: 25,
+        limit: 25,
+      },
+    }),
+  );
+  renderPage("/search?q=milk&offset=25");
+  expect(screen.getByText(/No purchases on this page/)).toBeInTheDocument();
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [],
+        total: 0,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "First page" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=milk$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+  expect(
+    screen.getByText(/No purchases match these filters/),
+  ).toBeInTheDocument();
+});
+
+it.each([
+  ["   ", "Enter at least 2 characters."],
+  ["x".repeat(201), "Use at most 200 characters."],
+])(
+  "rejects invalid submitted phrase without replacing the current results",
+  async (draft, message) => {
+    renderPage("/search?q=milk&offset=25");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Search purchases" }),
+      { target: { value: draft } },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      "?q=milk&offset=25",
+    );
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      25,
+      25,
+      true,
+      expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+    );
+  },
+);
+it("restores submitted query and page with browser Back, discarding the other search draft", async () => {
+  renderPage("/search?q=milk&offset=25");
+  fireEvent.change(screen.getByRole("textbox", { name: "Search purchases" }), {
+    target: { value: "hot dogs" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=hot\+dogs$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "hot dogs",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Search purchases" }), {
+    target: { value: "unsubmitted bread" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Browser Back" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=milk&offset=25$/,
+    ),
+  );
+  expect(screen.getByRole("textbox", { name: "Search purchases" })).toHaveValue(
+    "milk",
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    25,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+});
+
+it("loads GUID history without a placeholder phrase and clears identity for a new search", async () => {
+  const id = "0d196918-51ca-4ddd-a4cd-039720bab253";
+  renderPage(
+    `/search?normalizedDescriptionId=${id}&startDate=2025-01-01&offset=25`,
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "",
+    25,
+    25,
+    true,
+    expect.objectContaining({
+      normalizedDescriptionId: id,
+      includeUnreviewed: false,
+    }),
+  );
+  expect(screen.getByText(/Filtered to one product identity/)).toBeVisible();
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Search purchases" }),
+    "bread",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(currentParams().get("q")).toBe("bread"));
+  expect(currentParams().get("normalizedDescriptionId")).toBeNull();
+  expect(currentParams().get("offset")).toBeNull();
+  expect(currentParams().get("startDate")).toBe("2025-01-01");
+});
+
+it("includes unreviewed associations only after an explicit opt in", async () => {
+  renderPage("/search?q=milk&offset=25");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    25,
+    25,
+    true,
+    expect.objectContaining({ includeUnreviewed: false }),
+  );
+  await userEvent.click(
+    screen.getByRole("checkbox", {
+      name: "Include unreviewed product associations",
+    }),
+  );
+  expect(currentParams().get("includeUnreviewed")).toBe("true");
+  expect(currentParams().get("offset")).toBeNull();
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({ includeUnreviewed: true }),
+  );
+});
+
+it("shows length validation only when a submitted query needs it", async () => {
+  renderPage("/search");
+  expect(screen.queryByText(/Enter between 2 and 200/)).not.toBeInTheDocument();
+  expect(
+    screen.getByPlaceholderText("Search item names, codes, or stores"),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Enter at least 2 characters.",
+  );
+  expect(
+    screen.getByText(
+      /the comparable column standardizes package sizes/,
+    ),
+  ).toBeInTheDocument();
+});
+
+it("loads category-only history from a shared URL and changes category views without losing filters", async () => {
+  const categoryId = taxonomyFixture.nodes[1].id;
+  renderPage(
+    `/search?categoryId=${categoryId}&categoryView=currentHierarchy&location=Market&offset=25`,
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "",
+    25,
+    25,
+    true,
+    expect.objectContaining({
+      categoryId,
+      categoryView: "currentHierarchy",
+      location: "Market",
+    }),
+  );
+  const picker = screen.getByRole("combobox", { name: "Category" });
+  expect(picker).toHaveAttribute("title", "Food / Dairy");
+  expect(picker).toHaveTextContent("Dairy");
+  expect(picker).toHaveTextContent("Food");
+  await userEvent.selectOptions(
+    screen.getByLabelText("Category view"),
+    "asClassified",
+  );
+  expect(currentParams().get("offset")).toBeNull();
+  expect(currentParams().get("location")).toBe("Market");
+  expect(search).toHaveBeenLastCalledWith(
+    "",
+    0,
+    25,
+    true,
+    expect.objectContaining({
+      categoryId,
+      categoryView: "asClassified",
+      location: "Market",
+    }),
+  );
+});
+
+it("selects a nested path, resets paging, and shows category paths and unresolved states", async () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [
+          {
+            ...item,
+            categoryState: "classified",
+            categoryPath: [
+              {
+                categoryId: taxonomyFixture.nodes[0].id,
+                name: "Food",
+                archived: false,
+              },
+              {
+                categoryId: taxonomyFixture.nodes[1].id,
+                name: "Dairy",
+                archived: false,
+              },
+            ],
+          },
+          {
+            ...item,
+            id: "item-2",
+            categoryState: "unresolvedLegacy",
+            categoryPath: [],
+          },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+  renderPage("/search?q=milk&offset=25&sortBy=quantity");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("combobox", { name: "Category" }));
+  await chooseCategoryOption(user, "Food / Dairy");
+  expect(currentParams().get("categoryId")).toBe(taxonomyFixture.nodes[1].id);
+  expect(currentParams().get("offset")).toBeNull();
+  expect(currentParams().get("sortBy")).toBe("quantity");
+  expect(
+    screen.getByText("Food / Dairy", { selector: "div" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Legacy category unresolved")).toBeInTheDocument();
+});
+
+it("preserves a category filter when the current taxonomy cannot resolve it", () => {
+  const oldId = "95000000-0000-4000-8000-000000000099";
+  renderPage(`/search?categoryId=${oldId}`);
+  expect(
+    screen.getByText(/no longer in the current taxonomy/),
+  ).toBeInTheDocument();
+  expect(search).toHaveBeenLastCalledWith(
+    "",
+    0,
+    25,
+    true,
+    expect.objectContaining({ categoryId: oldId }),
+  );
+});
+
+it("shows the API reason when a captured hierarchy revision is invalid", () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      isError: true,
+      error: {
+        status: 400,
+        detail: "The captured taxonomy revision is unavailable.",
+      },
+    }),
+  );
+  renderPage(
+    `/search?categoryId=${taxonomyFixture.nodes[1].id}&categoryView=currentHierarchy&capturedCurrentRevisionId=95000000-0000-4000-8000-000000000099`,
+  );
+  expect(
+    screen.getByText("The captured taxonomy revision is unavailable."),
+  ).toBeInTheDocument();
+});
+
+it("shows comparable per-unit prices and units without merging variants", async () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [
+          {
+            ...item,
+            id: "item-gal",
+            description: "Whole milk gallon",
+            quantity: 1,
+            unitPrice: 3.99,
+            unitOfMeasure: "gal",
+          },
+          {
+            ...item,
+            id: "item-plain",
+            description: "Eggs dozen",
+            quantity: 1,
+            unitPrice: 4.5,
+            unitOfMeasure: null,
+          },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+  renderPage("/search?q=milk");
+  expect(await screen.findByText("Per unit, comparable")).toBeInTheDocument();
+  expect(screen.getByText("1 gal")).toBeInTheDocument();
+  expect(screen.getByText("USD 0.11 / 100 ml")).toBeInTheDocument();
+  expect(screen.getByText("USD 4.50 / each")).toBeInTheDocument();
+});
