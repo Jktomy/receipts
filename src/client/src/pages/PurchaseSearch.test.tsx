@@ -1,160 +1,277 @@
-LINE001
-LINE002
-LINE003
-LINE004
-LINE005
-LINE006
-LINE007
-LINE008
-LINE009
-LINE010
-LINE011
-LINE012
-LINE013
-LINE014
-LINE015
-LINE016
-LINE017
-LINE018
-LINE019
-LINE020
-LINE021
-LINE022
-LINE023
-LINE024
-LINE025
-LINE026
-LINE027
-LINE028
-LINE029
-LINE030
-LINE031
-LINE032
-LINE033
-LINE034
-LINE035
-LINE036
-LINE037
-LINE038
-LINE039
-LINE040
-LINE041
-LINE042
-LINE043
-LINE044
-LINE045
-LINE046
-LINE047
-LINE048
-LINE049
-LINE050
-LINE051
-LINE052
-LINE053
-LINE054
-LINE055
-LINE056
-LINE057
-LINE058
-LINE059
-LINE060
-LINE061
-LINE062
-LINE063
-LINE064
-LINE065
-LINE066
-LINE067
-LINE068
-LINE069
-LINE070
-LINE071
-LINE072
-LINE073
-LINE074
-LINE075
-LINE076
-LINE077
-LINE078
-LINE079
-LINE080
-LINE081
-LINE082
-LINE083
-LINE084
-LINE085
-LINE086
-LINE087
-LINE088
-LINE089
-LINE090
-LINE091
-LINE092
-LINE093
-LINE094
-LINE095
-LINE096
-LINE097
-LINE098
-LINE099
-LINE100
-LINE101
-LINE102
-LINE103
-LINE104
-LINE105
-LINE106
-LINE107
-LINE108
-LINE109
-LINE110
-LINE111
-LINE112
-LINE113
-LINE114
-LINE115
-LINE116
-LINE117
-LINE118
-LINE119
-LINE120
-LINE121
-LINE122
-LINE123
-LINE124
-LINE125
-LINE126
-LINE127
-LINE128
-LINE129
-LINE130
-LINE131
-LINE132
-LINE133
-LINE134
-LINE135
-LINE136
-LINE137
-LINE138
-LINE139
-LINE140
-LINE141
-LINE142
-LINE143
-LINE144
-LINE145
-LINE146
-LINE147
-LINE148
-LINE149
-LINE150
-LINE151
-LINE152
-LINE153
-LINE154
-LINE155
-LINE156
-LINE157
-LINE158
-LINE159
-LINE160
+import type { components } from "@/generated/api";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useLocation, useNavigate } from "react-router";
+import { renderWithProviders } from "@/test/test-utils";
+import { mockQueryResult } from "@/test/mock-hooks";
+import { usePurchaseSearch } from "@/hooks/usePurchaseSearch";
+import { useCategoryTaxonomy } from "@/hooks/useCategoryTaxonomy";
+import { taxonomyFixture } from "@/test/taxonomy-fixture";
+import PurchaseSearch from "./PurchaseSearch";
+import { chooseCategoryOption } from "@/test/category-picker";
+vi.mock("@/hooks/usePurchaseSearch", () => ({ usePurchaseSearch: vi.fn() }));
+vi.mock("@/hooks/useCategoryTaxonomy", () => ({
+  useCategoryTaxonomy: vi.fn(),
+}));
+const search = vi.mocked(usePurchaseSearch);
+const taxonomy = vi.mocked(useCategoryTaxonomy);
+const item: components["schemas"]["PurchaseSearchItem"] = {
+  id: "item-1",
+  receiptId: "receipt-1",
+  categoryState: "unclassified",
+  categoryPath: [],
+  description: "Whole milk",
+  receiptItemCode: "MILK-42",
+  normalizedDescription: "Milk",
+  normalizationReviewState: "verified",
+  date: "2020-01-15",
+  location: "Old store",
+  quantity: 2,
+  unitPrice: 1.2345,
+  unitPriceCurrency: "USD",
+  totalAmount: 2.47,
+  totalAmountCurrency: "USD",
+};
+function Location() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="Current URL">{location.search}</output>
+      <button onClick={() => navigate(-1)}>Browser Back</button>
+    </>
+  );
+}
+function renderPage(route = "/search?q=milk") {
+  return renderWithProviders(
+    <>
+      <PurchaseSearch />
+      <Location />
+    </>,
+    { route },
+  );
+}
+beforeEach(() => {
+  localStorage.clear();
+  search.mockReset();
+  taxonomy.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      isLoading: false,
+      data: taxonomyFixture,
+    }),
+  );
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [item],
+        total: 26,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+});
+
+function currentParams() {
+  return new URLSearchParams(
+    screen.getByLabelText("Current URL").textContent ?? "",
+  );
+}
+
+it("sorts on the server and resets offset while preserving filters and unrelated URL state", async () => {
+  renderPage(
+    "/search?q=milk&offset=50&location=Market&minUnitPrice=1.2345&limit=25&unrelated=keep",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Unit price" }));
+  expect(currentParams().get("offset")).toBeNull();
+  expect(currentParams().get("location")).toBe("Market");
+  expect(currentParams().get("unrelated")).toBe("keep");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({
+      sortBy: "unitPrice",
+      sortDirection: "asc",
+      location: "Market",
+      minUnitPrice: 1.2345,
+    }),
+  );
+  expect(
+    screen.getByRole("columnheader", { name: "Unit price" }),
+  ).toHaveAttribute("aria-sort", "ascending");
+  await userEvent.click(screen.getByRole("button", { name: "Unit price" }));
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "unitPrice", sortDirection: "desc" }),
+  );
+});
+
+it("applies filters atomically and preserves them when submitting another phrase", async () => {
+  renderPage("/search?q=milk&offset=50&sortBy=quantity&sortDirection=asc");
+  const calls = search.mock.calls.length;
+  fireEvent.change(screen.getByLabelText("Store contains"), {
+    target: { value: "  New store  " },
+  });
+  fireEvent.change(screen.getByLabelText("Minimum unit price"), {
+    target: { value: "0" },
+  });
+  expect(search).toHaveBeenCalledTimes(calls);
+  await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      0,
+      25,
+      true,
+      expect.objectContaining({
+        location: "New store",
+        minUnitPrice: 0,
+        sortBy: "quantity",
+        sortDirection: "asc",
+      }),
+    ),
+  );
+  await waitFor(() => {
+    expect(currentParams().get("location")).toBe("New store");
+    expect(currentParams().get("minUnitPrice")).toBe("0");
+    expect(currentParams().get("offset")).toBeNull();
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search purchases" }), {
+    target: { value: "hot dogs" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(currentParams().get("q")).toBe("hot dogs"));
+  expect(currentParams().get("location")).toBe("New store");
+  expect(currentParams().get("minUnitPrice")).toBe("0");
+  expect(currentParams().get("sortBy")).toBe("quantity");
+});
+
+it("remembers rows per page only for purchase history and resets offset without losing filters", async () => {
+  const user = userEvent.setup();
+  const view = renderPage("/search?q=milk&offset=25&location=Market");
+  screen.getByRole("combobox", { name: "Rows per page" }).focus();
+  await user.keyboard("{Enter}{End}{Enter}");
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      0,
+      100,
+      true,
+      expect.objectContaining({ location: "Market" }),
+    ),
+  );
+  expect(currentParams().get("limit")).toBe("100");
+  expect(localStorage.getItem("table-page-size:purchase-history")).toBe("100");
+  expect(localStorage.getItem("table-page-size:receipts")).toBeNull();
+  view.unmount();
+  renderPage("/search?q=milk");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    100,
+    true,
+    expect.objectContaining({ sortBy: "date" }),
+  );
+});
+
+it.each([
+  "startDate=2025-02-30",
+  "minUnitPrice=-1",
+  "startDate=2025-02-02&endDate=2025-02-01",
+])("rejects invalid linked filters without searching: %s", (filter) => {
+  renderPage(`/search?q=milk&${filter}`);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Some filters are invalid",
+  );
+  expect(search.mock.calls.at(-1)?.[3]).toBe(false);
+  expect(
+    screen.queryByRole("table", { name: "Purchase results" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows historical purchase evidence with precision and a receipt link", () => {
+  renderPage();
+  expect(
+    screen.getByRole("heading", { name: "Purchase history" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("table", { name: "Purchase results" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Old store/)).toBeInTheDocument();
+  expect(screen.getByText(/USD\s1\.2345/)).toBeInTheDocument();
+  expect(screen.getByText(/USD\s2\.47/)).toBeInTheDocument();
+  expect(screen.getByText("Code: MILK-42")).toBeInTheDocument();
+  expect(screen.getByText(/Verified product\s*:\s*Milk/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View receipt" })).toHaveAttribute(
+    "href",
+    "/receipts/receipt-1",
+  );
+});
+
+it("paginates through URL state and resets the page when a new phrase is submitted", async () => {
+  const user = userEvent.setup();
+  renderPage();
+  expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Next page" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=milk&offset=25$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    25,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+  await user.clear(screen.getByRole("textbox", { name: "Search purchases" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "Search purchases" }),
+    "  bread  ",
+  );
+  await user.click(screen.getByRole("button", { name: "Search" }));
+  // The async resolver and router transition may render before the URL commits.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      /^\?q=bread$/,
+    ),
+  );
+  expect(search).toHaveBeenLastCalledWith(
+    "bread",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+  );
+});
+
+it.each(["-1", "nope", "2147483648", "9007199254740993"])(
+  "rejects invalid URL offset %s",
+  (offset) => {
+    renderPage(`/search?q=milk&offset=${offset}`);
+    expect(search).toHaveBeenCalledWith(
+      "milk",
+      0,
+      25,
+      true,
+      expect.objectContaining({ sortBy: "date", sortDirection: "desc" }),
+    );
+  },
+);
+
+it("explains empty search without presenting results", async () => {
+  renderPage("/search");
+  expect(
+    screen.getByPlaceholderText("Search item names, codes, or stores"),
+  ).not.toBeInTheDocument();
+});
