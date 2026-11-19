@@ -81,3 +81,36 @@ function currentParams() {
     screen.getByLabelText("Current URL").textContent ?? "",
   );
 }
+
+it("sorts on the server and resets offset while preserving filters and unrelated URL state", async () => {
+  renderPage(
+    "/search?q=milk&offset=50&location=Market&minUnitPrice=1.2345&limit=25&unrelated=keep",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Unit price" }));
+  expect(currentParams().get("offset")).toBeNull();
+  expect(currentParams().get("location")).toBe("Market");
+  expect(currentParams().get("unrelated")).toBe("keep");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({
+      sortBy: "unitPrice",
+      sortDirection: "asc",
+      location: "Market",
+      minUnitPrice: 1.2345,
+    }),
+  );
+  expect(
+    screen.getByRole("columnheader", { name: "Unit price" }),
+  ).toHaveAttribute("aria-sort", "ascending");
+  await userEvent.click(screen.getByRole("button", { name: "Unit price" }));
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    25,
+    true,
+    expect.objectContaining({ sortBy: "unitPrice", sortDirection: "desc" }),
+  );
+});
