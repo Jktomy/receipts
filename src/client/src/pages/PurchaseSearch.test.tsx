@@ -154,3 +154,46 @@ it("applies filters atomically and preserves them when submitting another phrase
   expect(currentParams().get("minUnitPrice")).toBe("0");
   expect(currentParams().get("sortBy")).toBe("quantity");
 });
+
+it("remembers rows per page only for purchase history and resets offset without losing filters", async () => {
+  const user = userEvent.setup();
+  const view = renderPage("/search?q=milk&offset=25&location=Market");
+  screen.getByRole("combobox", { name: "Rows per page" }).focus();
+  await user.keyboard("{Enter}{End}{Enter}");
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "milk",
+      0,
+      100,
+      true,
+      expect.objectContaining({ location: "Market" }),
+    ),
+  );
+  expect(currentParams().get("limit")).toBe("100");
+  expect(localStorage.getItem("table-page-size:purchase-history")).toBe("100");
+  expect(localStorage.getItem("table-page-size:receipts")).toBeNull();
+  view.unmount();
+  renderPage("/search?q=milk");
+  expect(search).toHaveBeenLastCalledWith(
+    "milk",
+    0,
+    100,
+    true,
+    expect.objectContaining({ sortBy: "date" }),
+  );
+});
+
+it.each([
+  "startDate=2025-02-30",
+  "minUnitPrice=-1",
+  "startDate=2025-02-02&endDate=2025-02-01",
+])("rejects invalid linked filters without searching: %s", (filter) => {
+  renderPage(`/search?q=milk&${filter}`);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Some filters are invalid",
+  );
+  expect(search.mock.calls.at(-1)?.[3]).toBe(false);
+  expect(
+    screen.queryByRole("table", { name: "Purchase results" }),
+  ).not.toBeInTheDocument();
+});
