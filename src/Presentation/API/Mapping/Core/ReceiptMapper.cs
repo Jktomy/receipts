@@ -1,4 +1,6 @@
-using Application.Receipts;
+using API.Generated.Dtos;
+using Common;
+using Domain;
 using Domain.Core;
 using Presentation.API.Contracts.Receipts;
 using Riok.Mapperly.Abstractions;
