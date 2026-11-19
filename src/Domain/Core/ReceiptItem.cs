@@ -18,6 +18,8 @@ public class ReceiptItem
 	public string Description { get; set; }
 	public decimal Quantity { get; set; }
 	public Money UnitPrice { get; set; }
+	/// <summary>Canonical unit for <see cref="Quantity"/> (see <see cref="UnitCatalog"/>). Null means a plain countable item.</summary>
+	public string? UnitOfMeasure { get; set; }
 	public Money TotalAmount { get; set; }
 	// Category/Subcategory are stored as denormalized strings (not FK references).
 	// This is intentional: values capture the historical categorization at time of entry,
@@ -44,8 +46,9 @@ public class ReceiptItem
 	public const string CategoryCannotBeEmpty = "Category cannot be empty";
 	public const string UnitPriceMustBePositive = "Unit price must be positive";
 	public const string TotalAmountExceedsTolerance = "Total amount must be within $0.01 of quantity times unit price";
+	public const string UnitOfMeasureNotInCatalog = "Unit of measure is not a known unit.";
 
-	public ReceiptItem(Guid id, string? receiptItemCode, string description, decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory)
+	public ReceiptItem(Guid id, string? receiptItemCode, string description, decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory, string? unitOfMeasure = null)
 	{
 		Id = id;
 		ReceiptItemCode = receiptItemCode;
@@ -55,13 +58,15 @@ public class ReceiptItem
 		TotalAmount = totalAmount;
 		Category = category;
 		Subcategory = subcategory;
+		UnitOfMeasure = UnitCatalog.Normalize(unitOfMeasure);
 		ValidateForWrite();
 	}
 
 	// Only persistence hydration may retain facts that predate current admission rules.
 	// Infrastructure's write mapper validates the model again before creating an entity.
 	internal static ReceiptItem FromStoredState(Guid id, string? receiptItemCode, string description,
-		decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory)
+		decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory,
+		string? unitOfMeasure = null)
 		=> new()
 		{
 			Id = id,
@@ -71,7 +76,8 @@ public class ReceiptItem
 			UnitPrice = unitPrice,
 			TotalAmount = totalAmount,
 			Category = category,
-			Subcategory = subcategory
+			Subcategory = subcategory,
+			UnitOfMeasure = unitOfMeasure
 		};
 
 	private ReceiptItem()
@@ -83,10 +89,10 @@ public class ReceiptItem
 	}
 
 	internal void ValidateForWrite()
-		=> ValidateForWrite(Description, Quantity, UnitPrice, TotalAmount, Category);
+		=> ValidateForWrite(Description, Quantity, UnitPrice, TotalAmount, Category, UnitOfMeasure);
 
 	private static void ValidateForWrite(string description, decimal quantity, Money unitPrice,
-		Money totalAmount, string category)
+		Money totalAmount, string category, string? unitOfMeasure = null)
 	{
 		if (string.IsNullOrWhiteSpace(description))
 		{
@@ -112,6 +118,10 @@ public class ReceiptItem
 		if (category is null)
 		{
 			throw new ArgumentException(CategoryCannotBeEmpty, nameof(category));
+		}
+		if (unitOfMeasure is not null && !UnitCatalog.IsKnown(unitOfMeasure))
+		{
+			throw new ArgumentException(UnitOfMeasureNotInCatalog, nameof(unitOfMeasure));
 		}
 	}
 }
