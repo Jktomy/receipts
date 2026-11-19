@@ -4,6 +4,7 @@ import { usePageTitle } from "@/hooks/usePageTitle";
 import { PageHead } from "@/components/primitives";
 import { apiUrl } from "@/lib/api-config";
 import { getAccessToken, getSessionSignal } from "@/lib/auth";
+
 type AtlasItem = {
   description?: string;
   sku?: string;
@@ -44,6 +45,7 @@ type MatchResult = {
   fireflyTransactionId?: string;
   candidateTransactionIds?: string[];
 };
+
 async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET", body?: object): Promise<T> {
   const token = getAccessToken();
   if (!token) throw new Error("Sign in to Receipts to review imported documents");
@@ -66,10 +68,13 @@ async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET"
   }
   return data as T;
 }
+
 function matchLabel(match: MatchResult): string {
+  // A receipt without a Firefly payment is valid: neutral wording, never an error.
   if (match.status === "UNMATCHED") return "No payment linked";
   return match.status.replaceAll("_", " ");
 }
+
 function Field({ label, value, onChange }: {
   label: string; value?: string; onChange: (value: string) => void;
 }) {
@@ -80,8 +85,10 @@ function Field({ label, value, onChange }: {
     </label>
   );
 }
+
 const blankItem: AtlasItem = { description: "", quantity: "1", unit: "", unitPrice: "", total: "", evidence: "", sku: "" };
 const blankAdjustment: AtlasAdjustment = { type: "", amount: "", description: "" };
+
 export default function PaperlessInbox() {
   usePageTitle("Paperless Review");
   const [configured, setConfigured] = useState(false);
@@ -96,6 +103,7 @@ export default function PaperlessInbox() {
   const [error, setError] = useState<string>();
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [match, setMatch] = useState<MatchResult | null>(null);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -111,7 +119,9 @@ export default function PaperlessInbox() {
       setError(e instanceof Error ? e.message : "Cannot load Paperless inbox");
     } finally { setLoading(false); }
   }, []);
+
   useEffect(() => { void refresh(); }, [refresh]);
+
   async function select(id: number) {
     if (dirty && !window.confirm("Discard unsaved corrections?")) return;
     setBusy(true); setError(undefined); setMatch(null); setMessage(undefined);
@@ -171,6 +181,7 @@ export default function PaperlessInbox() {
     if (!window.confirm("Import these reviewed line items into Receipts? This does NOT change Firefly.")) return;
     setBusy(true); setError(undefined);
     try {
+      // Send the reviewed revision so a stale approval is rejected, not imported.
       await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision ?? undefined });
       setMessage("Imported to Receipts. Firefly remains unchanged.");
       await refresh();
