@@ -145,6 +145,29 @@ describe("PaperlessInbox", () => {
     expect(screen.getByText(/Draft revision 1/)).toBeInTheDocument();
   });
 
+  it("edits item units and sends them with corrections", async () => {
+    const state: BridgeState = {
+      rev: 1,
+      confirmed: null,
+      lastPut: null,
+      lastImport: null,
+      lastConfirm: null,
+    };
+    installBridge(state);
+    const user = await openDraft();
+    const unit = screen.getByLabelText("Item 1 unit");
+    expect(unit).toBeInTheDocument();
+    await user.clear(unit);
+    await user.type(unit, "gal");
+    await user.click(screen.getByRole("button", { name: "Save corrections" }));
+    await waitFor(() =>
+      expect(screen.getByText(/Corrections saved/)).toBeInTheDocument(),
+    );
+    expect(
+      (state.lastPut as { items: { unit?: string }[] }).items[0].unit,
+    ).toBe("gal");
+  });
+
   it("adds and removes items, then saves corrections", async () => {
     const state: BridgeState = {
       rev: 1,
