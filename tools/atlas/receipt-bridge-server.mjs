@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
-  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport
+  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport,
+  verifyFinalOcr
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -82,15 +83,50 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
   if (!config?.paperlessToken || !config?.requiredTagId || !config?.paperlessInstance) throw new Error("Paperless configuration required");
   if (!config?.openLyricModel || !config?.openLyricToken) throw new Error("Open Lyric configuration required");
   if (!config?.receiptsApiKey || !config?.receiptsUrl) throw new Error("Receipts import credentials required");
+  if (config.finalizationMode !== undefined && !["off", "strict"].includes(config.finalizationMode)) {
+    throw new Error("Unknown finalizationMode: " + String(config.finalizationMode));
+  }
+  for (const [key, min] of [["finalizationMaxAttempts", 1], ["finalizationIntervalMs", 0], ["finalizationStableReads", 2]]) {
+    const v = config[key];
+    if (v !== undefined && (!Number.isSafeInteger(v) || v < min)) {
+      throw new Error("Invalid " + key + ": " + String(v));
+    }
+  }
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const active = new Set();
+
+  // Post-OCR finalization gate: an Updated event is a signal, never proof.
+  // In strict mode the bridge requires doc-ID-bound completion evidence
+  // (settled tasks + stable revision + Paperless-AI done) BEFORE any model
+  // call. Unproven documents fail closed to manual review with zero model
+  // calls and no draft. Returns the sanitized draft, or null when gated.
+  async function runFinalizationGate(id, source) {
+    const gate = await verifyFinalOcr(fetcher, config, source);
+    if (gate.ok) {
+      // Draft from the PROVEN revision, never the pre-gate fetch.
+      const proven = gate.source ?? source;
+      return {
+        parsed: sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, proven.content)),
+        evidence: gate.evidence ?? null,
+        proven
+      };
+    }
+    const old = getState(dataDir, id);
+    setState(dataDir, id, {
+      ...(old ?? { paperlessId: id }),
+      status: "REVIEW_REQUIRED",
+      reason: gate.reason.slice(0, 160),
+      finalization: { mode: gate.mode, ok: false }
+    });
+    return null;
+  }
 
   async function processDocument(id) {
     if (active.has(id)) return;
     active.add(id);
     try {
       const previous = getState(dataDir, id);
-      const source = await getPaperlessText(fetcher, config, id);
+      let source = await getPaperlessText(fetcher, config, id);
       if (previous?.receiptId) {
         const state = source.contentHash === previous.contentHash
           ? { ...previous, status: "IMPORTED" }
@@ -119,7 +155,12 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         });
         return;
       }
-      const parsed = sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, source.content));
+      const gated = await runFinalizationGate(id, source);
+      if (!gated) return;
+      const parsed = gated.parsed;
+      // Qualify and store the PROVEN revision: the gate may have waited
+      // through OCR changes, so the pre-gate fetch is superseded here.
+      source = gated.proven ?? source;
       const qualified = qualifyItemization(parsed, source.content);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
@@ -127,6 +168,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         problems: qualified.problems,
         draftRevision: (previous?.draftRevision ?? 0) + 1,
         reviewerEdited: false,
+        finalization: { mode: config.finalizationMode ?? "off", ok: true, evidence: gated.evidence },
         // No original PDF, card number, bank details or full OCR text stored here.
         draft: parsed
       };
@@ -322,6 +364,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           return safeJson(response, 400, { error: "Expected draft revision is required to save corrections" });
         }
         if (expectedSave !== (previous.draftRevision ?? null)) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to save corrections" });
+        }
+        if (expectedSave !== (previous.draftRevision ?? null)) {
           return safeJson(response, 409, { error: "Draft changed since you loaded it: reload before saving", draftRevision: previous.draftRevision ?? null });
         }
         const draftRevision = (previous.draftRevision ?? 0) + 1;
@@ -402,7 +447,13 @@ if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.arg
     webhookSecret: secret("ATLAS_WEBHOOK_SECRET"),
     operatorSecret: secret("ATLAS_OPERATOR_SECRET"),
     allowCloudProcessing: process.env.ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING === "1",
-    autoImport: process.env.ATLAS_AUTO_IMPORT_ENABLED === "1"
+    autoImport: process.env.ATLAS_AUTO_IMPORT_ENABLED === "1",
+    finalizationMode: process.env.ATLAS_FINALIZATION_MODE === "strict" ? "strict" : "off",
+    paperlessAiUrl: process.env.ATLAS_PAPERLESS_AI_URL || undefined,
+    paperlessAiToken: process.env.ATLAS_PAPERLESS_AI_TOKEN_FILE ? secret("ATLAS_PAPERLESS_AI_TOKEN") : undefined,
+    finalizationMaxAttempts: Number(process.env.ATLAS_FINALIZATION_MAX_ATTEMPTS || 6),
+    finalizationIntervalMs: Number(process.env.ATLAS_FINALIZATION_INTERVAL_MS || 5000),
+    finalizationStableReads: Number(process.env.ATLAS_FINALIZATION_STABLE_READS || 2)
   };
   const bind = process.env.ATLAS_BRIDGE_BIND || "127.0.0.1";
   const port = Number(process.env.ATLAS_BRIDGE_PORT || 8675);
