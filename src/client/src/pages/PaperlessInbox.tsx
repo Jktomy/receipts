@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { PageHead } from "@/components/primitives";
 import { apiUrl } from "@/lib/api-config";
-import { getAccessToken, getSessionSignal } from "@/lib/auth";
+import { getAccessToken, getSessionSignal, parseJwtPayload } from "@/lib/auth";
 
 type AtlasItem = {
   description?: string;
@@ -35,6 +35,7 @@ type DraftSummary = {
   problems: string[];
   receiptId?: string | null;
   draftRevision?: number | null;
+  contentHash?: string | null;
   confirmedFireflyTransactionId?: string | null;
   merchant?: string | null;
   date?: string | null;
@@ -48,7 +49,7 @@ type MatchResult = {
   candidateTransactionIds?: string[];
 };
 
-async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET", body?: object): Promise<T> {
+async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET", body?: object, headers?: Record<string, string>): Promise<T> {
   const token = getAccessToken();
   if (!token) throw new Error("Sign in to Receipts to review imported documents");
   const response = await fetch(apiUrl(path), {
@@ -60,6 +61,7 @@ async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET"
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
       ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -69,6 +71,25 @@ async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET"
     throw new Error(problem);
   }
   return data as T;
+}
+
+/**
+ * The reviewer's explicit approval of the exact draft on screen: identity from
+ * the signed-in JWT, evidence bound to the OCR digest and draft revision the
+ * bridge will re-check. The server rejects a stale or mismatched attestation.
+ */
+export function reviewAttestationHeader(draft: DraftState): string | undefined {
+  const token = getAccessToken();
+  const claims = token ? parseJwtPayload(token) : null;
+  if (!claims?.email || !draft.contentHash || draft.draftRevision == null) return undefined;
+  const evidence = {
+    reviewer: claims.email,
+    approvedAt: new Date().toISOString(),
+    ocrSha256: draft.contentHash,
+    draftRevision: String(draft.draftRevision),
+    finding: "Model did not attest high confidence",
+  };
+  return btoa(JSON.stringify(evidence));
 }
 
 function matchLabel(match: MatchResult): string {
@@ -192,7 +213,8 @@ export default function PaperlessInbox() {
     setBusy(true); setError(undefined);
     try {
       // Send the reviewed revision so a stale approval is rejected, not imported.
-      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision });
+      const attestation = reviewAttestationHeader(selected);
+      await atlasApi(`/api/atlas/paperless/drafts/${selected.paperlessId}/import`, "POST", { expectedRevision: selected.draftRevision }, attestation ? { "X-Atlas-Review-Attestation": attestation } : undefined);
       setMessage("Imported to Receipts. Firefly remains unchanged.");
       await refresh();
       const state = await atlasApi<DraftState>(`/api/atlas/paperless/drafts/${selected.paperlessId}`);
