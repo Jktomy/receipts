@@ -63,7 +63,7 @@ public partial class ReceiptItemMapper
 		=> ReceiptItem.FromStoredState(source.Id, source.ReceiptItemCode, source.Description,
 			source.Quantity, new Money(source.UnitPrice, source.UnitPriceCurrency),
 			new Money(source.TotalAmount, source.TotalAmountCurrency), source.Category, source.Subcategory,
-			source.UnitOfMeasure);
+			source.UnitOfMeasure, source.PackageContentQuantity, source.PackageContentUnit);
 
 	private Money MapUnitPrice(decimal amount, Currency currency) => new(amount, currency);
 	private Money MapTotalAmount(decimal amount, Currency currency) => new(amount, currency);

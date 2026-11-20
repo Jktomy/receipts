@@ -38,6 +38,13 @@ describe("unit-prices", () => {
     expect(display.amount).toBeCloseTo(0.16, 2);
   });
 
+  it("prices a count multipack per piece, not per package", () => {
+    // EGGS 12 CT $4.50: one carton compares at $0.375 per egg.
+    const eggs = toComparableUnitPrice(1, 4.5, "each", 12, "count");
+    expect(eggs?.canonicalUnit).toBe("each");
+    expect(eggs!.amountPerCanonicalUnit).toBeCloseTo(0.375, 10);
+  });
+
   it("refuses mass/volume without package content as ambiguous", () => {
     // A bare fl_oz quantity may count packages, not ounces: never label it.
     expect(toComparableUnitPrice(1, 3.0, "fl_oz")).toBeNull();

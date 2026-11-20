@@ -77,6 +77,15 @@ public class UnitCatalogTests
 	}
 
 	[Fact]
+	public void ComparableUnitPrice_CountMultipackPricesPerPiece()
+	{
+		// EGGS 12 CT $4.50: one carton compares at $0.375 per egg.
+		Assert.True(UnitCatalog.TryGetComparableUnitPrice(1m, 4.50m, "each", 12m, "count", out decimal perEach, out string unit));
+		Assert.Equal("each", unit);
+		Assert.Equal(4.50m / 12m, perEach);
+	}
+
+	[Fact]
 	public void ComparableUnitPrice_MassVolumeWithoutContent_IsNotComparable()
 	{
 		Assert.False(UnitCatalog.TryGetComparableUnitPrice(1m, 3.00m, "fl_oz", out _, out _));

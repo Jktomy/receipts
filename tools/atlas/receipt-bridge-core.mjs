@@ -244,6 +244,63 @@ export function qualifyItemization(raw, ocrText) {
   };
 }
 
+export const LOW_CONFIDENCE_PROBLEM = "Model did not attest high confidence";
+
+export function attestationDigest(ocrText) {
+  return createHash("sha256").update(String(ocrText ?? ""), "utf8").digest("hex");
+}
+
+// An approval is evidence only for the exact draft it names: same OCR bytes,
+// same draft revision, reviewer distinct from the proposing model. Anything
+// else is stale or missing and must block the import.
+export function verifyReviewAttestation(attestation, { ocrText, draftRevision, proposer } = {}) {
+  if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)) {
+    return { ok: false, problems: ["Reviewer approval is required for a low-confidence extraction"] };
+  }
+  const problems = [];
+  const reviewer = typeof attestation.reviewer === "string" ? attestation.reviewer.trim() : "";
+  if (!reviewer) problems.push("Reviewer identity is missing");
+  if (proposer && reviewer && reviewer.toLowerCase() === String(proposer).trim().toLowerCase()) {
+    problems.push("Reviewer must differ from the proposer");
+  }
+  if (!attestation.approvedAt || Number.isNaN(Date.parse(attestation.approvedAt))) {
+    problems.push("Approval timestamp is missing or invalid");
+  }
+  if (typeof attestation.draftRevision !== "string" || attestation.draftRevision === "") {
+    problems.push("Approval is not bound to a draft revision");
+  } else if (attestation.draftRevision !== String(draftRevision)) {
+    problems.push("Approval is stale: draft revision changed");
+  }
+  const expected = attestationDigest(ocrText);
+  if (typeof attestation.ocrSha256 !== "string" || !/^[0-9a-f]{64}$/.test(attestation.ocrSha256)) {
+    problems.push("Approval is not bound to the source OCR");
+  } else if (attestation.ocrSha256 !== expected) {
+    problems.push("Approval is stale: source OCR changed");
+  }
+  return { ok: problems.length === 0, problems, reviewer, ocrSha256: expected };
+}
+
+// Only the model's confidence finding is approvable. Structural findings
+// (math, evidence, units, reconciliation) never become importable by approval.
+export function authorizeImport(qualified, attestation, context = {}) {
+  if (qualified?.ok) return { ok: true, approved: false, problems: [] };
+  const remaining = (qualified?.problems ?? []).filter(problem => problem !== LOW_CONFIDENCE_PROBLEM);
+  if (remaining.length > 0 || (qualified?.problems ?? []).length === 0) {
+    return { ok: false, approved: false, problems: remaining.length ? remaining : ["Receipt did not qualify"] };
+  }
+  const review = verifyReviewAttestation(attestation, context);
+  if (!review.ok) return { ok: false, approved: false, problems: review.problems };
+  return {
+    ok: true, approved: true, problems: [],
+    attestation: {
+      reviewer: review.reviewer,
+      approvedAt: new Date(attestation.approvedAt).toISOString(),
+      ocrSha256: review.ocrSha256,
+      draftRevision: String(context.draftRevision)
+    }
+  };
+}
+
 export function stableSourceRequestId(instance, paperlessId) {
   // RFC 4122 variant/version 5-compatible shape from a stable SHA-256 prefix.
   const hex = createHash("sha256").update("atlas-receipt-v1\0" + instance + "\0" + String(paperlessId)).digest("hex");
@@ -251,10 +308,17 @@ export function stableSourceRequestId(instance, paperlessId) {
     "-a" + hex.slice(17, 20) + "-" + hex.slice(20, 32);
 }
 
-export function toCompleteReceiptRequest(qualified, instance, paperlessId) {
-  if (!qualified.ok) throw new Error("Unqualified receipt cannot be imported");
+export function toCompleteReceiptRequest(qualified, instance, paperlessId, attestation = null) {
+  // A low-confidence draft is importable only with an attestation that
+  // authorizeImport already validated; structural findings never are.
+  const approvalBound = attestation && typeof attestation.reviewer === "string" && attestation.reviewer !== "" &&
+    typeof attestation.ocrSha256 === "string" && typeof attestation.draftRevision === "string";
+  const approvable = !qualified.ok && approvalBound &&
+    (qualified.problems ?? []).every(problem => problem === LOW_CONFIDENCE_PROBLEM);
+  if (!qualified.ok && !approvable) throw new Error("Unqualified receipt cannot be imported");
   return {
     clientRequestId: stableSourceRequestId(instance, paperlessId),
+    reviewAttestation: attestation,
     receipt: { ...qualified.receipt, sourcePaperlessDocumentId: paperlessId },
     items: qualified.items.map(item => ({ ...item })),
     adjustments: qualified.adjustments,
@@ -339,9 +403,9 @@ export async function extractUsingOpenLyric(fetcher, config, ocrText) {
   return parsed;
 }
 
-export async function importQualifiedReceipt(fetcher, config, qualified, paperlessId) {
+export async function importQualifiedReceipt(fetcher, config, qualified, paperlessId, attestation = null) {
   const endpoint = apiUrl(config.receiptsUrl, "/api/receipts/complete");
-  const payload = toCompleteReceiptRequest(qualified, config.paperlessInstance, paperlessId);
+  const payload = toCompleteReceiptRequest(qualified, config.paperlessInstance, paperlessId, attestation);
   const response = await fetcher(endpoint, {
     method: "POST", headers: { "X-API-Key": config.receiptsApiKey, "Content-Type": "application/json" },
     body: JSON.stringify(payload), redirect: "error", signal: AbortSignal.timeout(25000)

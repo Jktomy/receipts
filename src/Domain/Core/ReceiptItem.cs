@@ -51,7 +51,7 @@ public class ReceiptItem
 	public const string TotalAmountExceedsTolerance = "Total amount must be within $0.01 of quantity times unit price";
 	public const string UnitOfMeasureNotInCatalog = "Unit of measure is not a known unit.";
 	public const string PackageContentQuantityMustBePositive = "Package content quantity must be positive.";
-	public const string PackageContentUnitNotInCatalog = "Package content unit is not a known mass or volume.";
+	public const string PackageContentUnitNotInCatalog = "Package content unit is not a known count, mass or volume.";
 	public const string PackageUnitMustCountPackages = "Unit must count packages when package content is set.";
 
 	public ReceiptItem(Guid id, string? receiptItemCode, string description, decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory, string? unitOfMeasure = null, decimal? packageContentQuantity = null, string? packageContentUnit = null)
@@ -142,7 +142,7 @@ public class ReceiptItem
 			}
 			if (packageContentUnit is null || !UnitCatalog.IsKnown(packageContentUnit)
 				|| !UnitCatalog.TryGetDimension(packageContentUnit, out var contentDimension)
-				|| (contentDimension != UnitCatalog.Dimension.Mass && contentDimension != UnitCatalog.Dimension.Volume))
+				|| (contentDimension != UnitCatalog.Dimension.Count && contentDimension != UnitCatalog.Dimension.Mass && contentDimension != UnitCatalog.Dimension.Volume))
 			{
 				throw new ArgumentException(PackageContentUnitNotInCatalog, nameof(packageContentUnit));
 			}

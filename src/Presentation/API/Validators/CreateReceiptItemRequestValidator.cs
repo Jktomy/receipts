@@ -8,7 +8,7 @@ public class CreateReceiptItemRequestValidator : AbstractValidator<CreateReceipt
 	public const string UnitPriceMustBePositive = "Unit price must be positive.";
 	public const string UnitOfMeasureNotInCatalog = "Unit of measure is not a known unit.";
 	public const string PackageContentQuantityMustBePositive = "Package content quantity must be positive.";
-	public const string PackageContentUnitNotInCatalog = "Package content unit is not a known mass or volume.";
+	public const string PackageContentUnitNotInCatalog = "Package content unit is not a known count, mass or volume.";
 	public const string PackageUnitMustCountPackages = "Unit must count packages when package content is set.";
 	public const string DescriptionMustNotBeEmpty = "Description must not be empty.";
 	public const string QuantityMustBePositive = "Quantity must be positive.";
@@ -36,7 +36,7 @@ public class CreateReceiptItemRequestValidator : AbstractValidator<CreateReceipt
 			.WithMessage(PackageContentQuantityMustBePositive);
 
 		RuleFor(x => x.PackageContentUnit)
-			.Must((request, unit) => request.PackageContentQuantity is null && request.PackageContentUnit is null || IsMassOrVolume(unit))
+			.Must((request, unit) => request.PackageContentQuantity is null && request.PackageContentUnit is null || IsCountMassOrVolume(unit))
 			.WithMessage(PackageContentUnitNotInCatalog);
 
 		RuleFor(x => x.UnitOfMeasure)
@@ -44,13 +44,15 @@ public class CreateReceiptItemRequestValidator : AbstractValidator<CreateReceipt
 			.WithMessage(PackageUnitMustCountPackages);
 	}
 
-	private static bool IsMassOrVolume(string? unit)
+	// Package content is the measurable amount inside each package: count for
+	// multipacks (12 eggs), mass or volume for measured goods (64 fl oz).
+	private static bool IsCountMassOrVolume(string? unit)
 	{
 		if (unit is null || !Domain.Core.UnitCatalog.IsKnown(unit))
 		{
 			return false;
 		}
 		return Domain.Core.UnitCatalog.TryGetDimension(unit, out var dimension)
-			&& (dimension == Domain.Core.UnitCatalog.Dimension.Mass || dimension == Domain.Core.UnitCatalog.Dimension.Volume);
+			&& (dimension == Domain.Core.UnitCatalog.Dimension.Count || dimension == Domain.Core.UnitCatalog.Dimension.Mass || dimension == Domain.Core.UnitCatalog.Dimension.Volume);
 	}
 }

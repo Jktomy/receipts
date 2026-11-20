@@ -118,6 +118,14 @@ public class CreateReceiptItemRequestValidatorTests
 	}
 
 	[Fact]
+	public void Should_Pass_When_PackageContentModelsACountMultipack()
+	{
+		// EGGS 12 CT $4.50: purchased quantity 1 carton, contents 12 count.
+		CreateReceiptItemRequest request = new() { UnitPrice = 4.50, Description = "EGGS 12 CT", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 12, PackageContentUnit = "count" };
+		Assert.True(_validator.Validate(request).IsValid);
+	}
+
+	[Fact]
 	public void Should_Fail_When_PackageContentUnitMissing()
 	{
 		CreateReceiptItemRequest request = new() { UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 64, PackageContentUnit = null };

@@ -49,7 +49,9 @@ export interface ComparableUnitPrice {
  * Package-size rule: a mass/volume unit WITHOUT package content is NOT
  * comparable (the quantity may count packages, not the measured amount).
  * Supply packageContent (amount per package) to unlock the comparable, or use
- * a count unit. Never converts across dimensions or currencies. */
+ * a count unit. Count contents divide the package price across pieces (a
+ * 12-count carton at $4.50 compares at $0.375 per egg); mass/volume contents
+ * divide across the measured amount. Never converts across dimensions or currencies. */
 export function toComparableUnitPrice(
   quantity: number,
   unitPrice: number,
@@ -64,12 +66,21 @@ export function toComparableUnitPrice(
     if (typeof packageContentQuantity !== "number" || !Number.isFinite(packageContentQuantity) || packageContentQuantity <= 0) return null;
     const contentKey = typeof packageContentUnit === "string" ? packageContentUnit.trim().toLowerCase() : "";
     const contentEntry = FACTORS[contentKey];
-    if (!contentEntry || (contentEntry.dimension !== "mass" && contentEntry.dimension !== "volume")) return null;
+    if (!contentEntry) return null;
     // Total price over total content; the package count cancels out.
     // The item unit must count packages (or be blank), never a mass/volume.
     const normalized = (typeof unitOfMeasure === "string" && unitOfMeasure.trim() !== "" ? unitOfMeasure.trim().toLowerCase() : "each");
     const itemEntry = FACTORS[normalized];
     if (!itemEntry || itemEntry.dimension !== "count") return null;
+    if (contentEntry.dimension === "count") {
+      // Count multipack: one carton of 12 at $4.50 compares at $0.375 each.
+      return {
+        amountPerCanonicalUnit: unitPrice / packageContentQuantity,
+        canonicalUnit: canonicalUnitFor(contentEntry.dimension),
+        dimension: contentEntry.dimension,
+      };
+    }
+    if (contentEntry.dimension !== "mass" && contentEntry.dimension !== "volume") return null;
     return {
       amountPerCanonicalUnit: unitPrice / (packageContentQuantity * contentEntry.toCanonical),
       canonicalUnit: canonicalUnitFor(contentEntry.dimension),

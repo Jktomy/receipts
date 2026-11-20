@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
   toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric, sanitizePurchaseDraft,
-  getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits, dimensionOfUnit
+  getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits, dimensionOfUnit,
+  attestationDigest, verifyReviewAttestation, authorizeImport
 } from "./receipt-bridge-core.mjs";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
 
@@ -613,4 +615,73 @@ test("edit landing while Firefly responds blocks the stale confirmation", async 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("low-confidence import requires a bound, non-proposer approval", () => {
+  const low = qualifyItemization({ ...good, confidence: "low" }, ocr);
+  assert.equal(low.ok, false);
+  assert.deepEqual(low.problems, ["Model did not attest high confidence"]);
+  const digest = attestationDigest(ocr);
+  const valid = { reviewer: "jayson", approvedAt: "2026-11-20T06:30:00Z", ocrSha256: digest, draftRevision: "4" };
+  const context = { ocrText: ocr, draftRevision: "4", proposer: "open-lyric" };
+
+  assert.equal(authorizeImport(low, null, context).ok, false);
+  assert.match(authorizeImport(low, null, context).problems.join(" "), /approval is required/i);
+  assert.match(authorizeImport(low, { ...valid, reviewer: "Open-Lyric" }, context).problems.join(" "), /differ from the proposer/);
+  assert.match(authorizeImport(low, { ...valid, ocrSha256: attestationDigest(ocr + "\nEXTRA") }, context).problems.join(" "), /source OCR changed/);
+  assert.match(authorizeImport(low, { ...valid, draftRevision: "3" }, context).problems.join(" "), /draft revision changed/);
+  assert.match(authorizeImport(low, { ...valid, approvedAt: "not-a-date" }, context).problems.join(" "), /timestamp/);
+
+  const approved = authorizeImport(low, valid, context);
+  assert.equal(approved.ok, true);
+  assert.equal(approved.approved, true);
+  assert.equal(approved.attestation.reviewer, "jayson");
+  assert.equal(approved.attestation.draftRevision, "4");
+  assert.equal(approved.attestation.ocrSha256, digest);
+
+  const high = qualifyItemization({ ...good, total: "8.61" }, ocr);
+  assert.equal(authorizeImport(high, valid, context).ok, false, "structural findings stay unimportable");
+
+  const payload = toCompleteReceiptRequest(low, "paperless", 25, approved.attestation);
+  assert.equal(payload.reviewAttestation.reviewer, "jayson");
+  assert.equal(payload.receipt.sourcePaperlessDocumentId, 25);
+  assert.equal(toCompleteReceiptRequest(qualifyItemization(good, ocr), "paperless", 25).reviewAttestation, null);
+  assert.equal(verifyReviewAttestation(valid, context).ok, true);
+});
+test("low-confidence draft imports only with an authenticated, draft-bound approval", async () => {
+  await exerciseBridge(async ({ url, bridge, calls }) => {
+    await http(url + "/hooks/paperless", "POST", { sourceId: 44 }, "x-atlas-hook-key", config.webhookSecret);
+    await untilReady(bridge, 44);
+    const edited = { ...bridge.state(44).draft, confidence: "low", expectedRevision: bridge.state(44).draftRevision };
+    const saved = await http(url + "/drafts/44", "PUT", edited, "x-atlas-operator-key", config.operatorSecret);
+    assert.equal(saved.status, 200);
+    const revision = bridge.state(44).draftRevision;
+    const digest = createHash("sha256").update(ocr, "utf8").digest("hex");
+    const post = (body, reviewer) => fetch(url + "/drafts/44/import", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-atlas-operator-key": config.operatorSecret,
+        ...(reviewer ? { "x-atlas-reviewer": reviewer } : {})
+      },
+      body: JSON.stringify(body)
+    });
+
+    const blocked = await post({ expectedRevision: revision });
+    assert.equal(blocked.status, 422);
+    assert.match((await blocked.json()).problems.join(" "), /approval is required/i);
+    assert.equal(calls.some(c => c.host === "receipts.test"), false);
+
+    const stale = await post({ expectedRevision: revision, review: { approvedAt: "2026-11-20T06:30:00Z", ocrSha256: createHash("sha256").update(ocr + "\nX").digest("hex"), draftRevision: String(revision) } }, "jayson");
+    assert.equal(stale.status, 422);
+    assert.match((await stale.json()).problems.join(" "), /source OCR changed/);
+
+    const approved = await post({ expectedRevision: revision, review: { approvedAt: "2026-11-20T06:30:00Z", ocrSha256: digest, draftRevision: String(revision) } }, "jayson");
+    assert.equal(approved.status, 200);
+    assert.equal((await approved.json()).status, "IMPORTED");
+    const payload = JSON.parse(calls.find(c => c.host === "receipts.test").body);
+    assert.equal(payload.reviewAttestation.reviewer, "jayson");
+    assert.equal(payload.reviewAttestation.ocrSha256, digest);
+    assert.equal(payload.reviewAttestation.draftRevision, String(revision));
+  });
 });

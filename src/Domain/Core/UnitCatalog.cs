@@ -91,7 +91,10 @@ public static class UnitCatalog
 	/// Package-size rule: a mass/volume unit WITHOUT package content is NOT
 	/// comparable (the quantity may count packages, not the measured amount).
 	/// Supply packageContent (amount per package) to unlock the comparable, or
-	/// use a count unit. Never converts across dimensions or currencies.
+	/// use a count unit. Count contents divide the package price across pieces
+	/// (a 12-count carton at $4.50 compares at $0.375 per egg). Mass/volume
+	/// contents divide across the measured amount. Never converts across
+	/// dimensions or currencies.
 	/// </summary>
 	public static bool TryGetComparableUnitPrice(
 		decimal quantity,
@@ -117,13 +120,23 @@ public static class UnitCatalog
 				return false;
 			}
 			string? contentNormalized = Normalize(packageContentUnit);
-			if (contentNormalized is null || !Factors.TryGetValue(contentNormalized, out var contentEntry)
-				|| (contentEntry.Dimension != Dimension.Mass && contentEntry.Dimension != Dimension.Volume))
+			if (contentNormalized is null || !Factors.TryGetValue(contentNormalized, out var contentEntry))
 			{
 				return false;
 			}
 			string itemNormalized = Normalize(unitOfMeasure) ?? Each;
 			if (!Factors.TryGetValue(itemNormalized, out var itemEntry) || itemEntry.Dimension != Dimension.Count)
+			{
+				return false;
+			}
+			if (contentEntry.Dimension == Dimension.Count)
+			{
+				// Count multipack: one carton of 12 at $4.50 compares at $0.375 each.
+				amountPerCanonicalUnit = unitPrice / packageContentQuantity.Value;
+				canonicalUnit = CanonicalUnitFor(Dimension.Count);
+				return true;
+			}
+			if (contentEntry.Dimension != Dimension.Mass && contentEntry.Dimension != Dimension.Volume)
 			{
 				return false;
 			}
