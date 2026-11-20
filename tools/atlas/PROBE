@@ -1,0 +1,15 @@
+      if (request.method === "PUT" && !match[2]) {
+        const previous = getState(dataDir, id);
+        if (!previous?.contentHash || previous.receiptId) return safeJson(response, 409, { error: "No editable pending draft" });
+        if (active.has(id)) return safeJson(response, 409, { error: "Processing still active: retry shortly" });
+        const edited = await jsonBody(request, 100000);
+        // Compare-and-swap: the saver must name the revision it edited, so a
+        // second reviewer's save cannot silently overwrite the first.
+        const expectedSave = edited?.expectedRevision;
+        if (!Number.isSafeInteger(expectedSave) || expectedSave < 1) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to save corrections" });
+        }
+        if (expectedSave !== (previous.draftRevision ?? null)) {
+          return safeJson(response, 409, { error: "Draft changed since you loaded it: reload before saving", draftRevision: previous.draftRevision ?? null });
+        }
+        PLACEHOLDER_PUT_TAIL
