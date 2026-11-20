@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text;
+using API.Security;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -111,6 +113,23 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 		{
 			payload = "{}";
 		}
+		// Approval is the authenticated principal's, never the payload's. A header
+		// that is present must be valid, is re-stamped from the JWT, and replaces any
+		// client-supplied review before the bridge sees it. A high-confidence import
+		// needs no approval, so an absent header leaves the body untouched and the
+		// bridge remains the component that decides whether approval is required.
+		string attestationHeader = Request.Headers[AtlasReviewAttestation.HeaderName].ToString();
+		if (!string.IsNullOrWhiteSpace(attestationHeader))
+		{
+			if (!AtlasReviewAttestation.TryParse(attestationHeader, AuthenticatedReviewer(), out AtlasReviewAttestation? attestation, out string attestationError))
+			{
+				return BadRequest(new { error = attestationError });
+			}
+			if (!AtlasReviewAttestation.TryBind(payload, attestation!, out payload, out string bindError))
+			{
+				return BadRequest(new { error = bindError });
+			}
+		}
 		return await Forward(HttpMethod.Post, $"drafts/{id}/import", payload, ct);
 	}
 
@@ -123,6 +142,13 @@ public sealed class AtlasPaperlessController(IConfiguration configuration) : Con
 	public Task<IActionResult> ConfirmMatch(int id, [FromBody] System.Text.Json.JsonElement body, CancellationToken ct) =>
 		id > 0 ? Forward(HttpMethod.Post, $"drafts/{id}/confirm-match", body.GetRawText(), ct) :
 		Task.FromResult<IActionResult>(BadRequest(new { error = "Invalid document ID" }));
+
+	/// <summary>
+	/// The reviewer is the authenticated identity. The JWT carries NameIdentifier and
+	/// Email but no Name claim, so <c>User.Identity.Name</c> is null for token users.
+	/// </summary>
+	private string? AuthenticatedReviewer()
+		=> User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
 
 	private async Task<IActionResult> Forward(HttpMethod method, string path, string? body, CancellationToken ct)
 	{

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
-  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink
+  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -151,7 +151,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     }
   }
 
-  async function importReviewed(id, expectedRevision) {
+  async function importReviewed(id, expectedRevision, approval = null) {
     // Serialize concurrent approvals: the first import wins, the second sees the
     // recorded receiptId (idempotent replay) instead of posting a duplicate.
     if (active.has(id)) return { status: 409, result: { error: "Processing still active: retry shortly" } };
@@ -174,8 +174,16 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
       }
       const qualified = qualifyItemization(saved.draft, current.content);
-      if (!qualified.ok) return { status: 422, result: { error: "Itemization requires correction", problems: qualified.problems } };
-      const result = await importQualifiedReceipt(fetcher, config, qualified, id);
+      // A low-confidence extraction is importable only with an approval bound to
+      // this draft revision and this exact OCR text, from a reviewer distinct
+      // from the proposing model. Structural findings never become importable.
+      const decision = authorizeImport(qualified, approval, {
+        ocrText: current.content,
+        draftRevision: String(saved.draftRevision ?? ""),
+        proposer: saved.proposedBy ?? null
+      });
+      if (!decision.ok) return { status: 422, result: { error: "Itemization requires correction", problems: decision.problems } };
+      const result = await importQualifiedReceipt(fetcher, config, qualified, id, decision.attestation);
       setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
       return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
     } finally {
@@ -332,7 +340,18 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         if (!Number.isSafeInteger(importBody?.expectedRevision) || importBody.expectedRevision < 1) {
           return safeJson(response, 400, { error: "Expected draft revision is required to approve an import" });
         }
-        const result = await importReviewed(id, importBody.expectedRevision);
+        // Reviewer identity comes from the authenticated API layer's stamped
+        // header, never from the request body; the body supplies only the
+        // binding evidence (timestamp, OCR digest, draft revision).
+        // Reviewer identity is stamped into the body by the authenticated API
+        // layer; the header is only a fallback for direct operator calls.
+        const review = importBody?.review;
+        const reviewer = (typeof review?.reviewer === "string" ? review.reviewer.trim() : "") ||
+          String(request.headers["x-atlas-reviewer"] ?? "").trim();
+        const approval = review && typeof review === "object"
+          ? { reviewer, approvedAt: review.approvedAt, ocrSha256: review.ocrSha256, draftRevision: review.draftRevision }
+          : null;
+        const result = await importReviewed(id, importBody.expectedRevision, approval);
         return safeJson(response, result.status, result.result);
       }
       if (request.method === "POST" && match[2] === "match") {
