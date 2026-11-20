@@ -78,7 +78,7 @@ async function atlasApi<T>(path: `/api/atlas/paperless${string}`, method = "GET"
  * the signed-in JWT, evidence bound to the OCR digest and draft revision the
  * bridge will re-check. The server rejects a stale or mismatched attestation.
  */
-export function reviewAttestationHeader(draft: DraftState): string | undefined {
+function reviewAttestationHeader(draft: DraftState): string | undefined {
   const token = getAccessToken();
   const claims = token ? parseJwtPayload(token) : null;
   if (!claims?.email || !draft.contentHash || draft.draftRevision == null) return undefined;
