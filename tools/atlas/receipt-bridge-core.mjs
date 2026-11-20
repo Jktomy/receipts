@@ -379,6 +379,144 @@ const extractionRules = [
   "If uncertain, mark confidence low; do not try to make a total reconcile by fabricating values.",
 ].join(" ");
 
+// ---- Post-OCR finalization gate ----
+// A Paperless Updated event is a SIGNAL, not proof that final improved OCR
+// completed (Paperless-AI improvement + write-back lands as an update AFTER
+// the initial Added event). In strict mode the bridge requires doc-ID-bound
+// completion evidence BEFORE any model call and fails closed to manual
+// review when anything is unproven. Off mode preserves the historical
+// behavior and is NOT qualified for live intake.
+//
+// Evidence (all bound to the Paperless document ID + source revision):
+//  1. Paperless tasks: no pending/started/failed task references the doc.
+//  2. Revision stability: identical (contentHash, modified) across bounded
+//     consecutive re-fetches (each re-fetch re-enforces required/blocked tags).
+//  3. Paperless-AI (when paperlessAiUrl is configured): the doc is absent
+//     from active/queued processing AND its latest history entry is done.
+// Strict ok requires 1 + 2 + 3. Without an AI endpoint the gate can never
+// prove finalization, so it fails closed by design.
+//
+// Paperless-AI native HTTP paths below are the bridge's documented
+// assumption and MUST be confirmed against the installed Paperless-AI
+// version before live activation; a wrong path fails closed (unproven),
+// never open.
+const FINALIZATION_DEFAULTS = { maxAttempts: 6, intervalMsMs: 5000, stableReads: 2 };
+
+function paperlessTaskRefsDoc(t, documentId) {
+  const id = Number(documentId);
+  const ids = Array.isArray(t?.related_document_ids)
+    ? t.related_document_ids
+    : (Array.isArray(t?.related_documents) ? t.related_documents : []);
+  return ids.map(Number).includes(id);
+}
+
+async function paperlessTasksSettled(fetcher, config, documentId) {
+  // Residual: only the newest 100 tasks (single page) are inspected. A still-
+  // running task older than the page would read as settled; the revision-
+  // stability check and the Updated-event retrigger bound that window, and
+  // anything doubtful fails closed to manual review below.
+  try {
+    const url = apiUrl(config.paperlessUrl, "/api/tasks/?page_size=100&ordering=-date_created");
+    const response = await fetcher(url, {
+      method: "GET",
+      headers: { Authorization: "Token " + config.paperlessToken, Accept: "application/json" },
+      redirect: "error", signal: AbortSignal.timeout(15000)
+    });
+    const body = await jsonResponse(response, "Paperless");
+    const results = Array.isArray(body?.results) ? body.results : [];
+    for (const t of results) {
+      if (!paperlessTaskRefsDoc(t, documentId)) continue;
+      const status = String(t?.status ?? "").toLowerCase();
+      if (["pending", "started", "running"].includes(status)) {
+        return { settled: false, reason: "Paperless task " + String(t?.task_type ?? "task") + " still " + status + " for document " + documentId };
+      }
+      if (["failure", "failed", "error", "revoked"].includes(status)) {
+        return { settled: false, reason: "Paperless task " + String(t?.task_type ?? "task") + " " + status + " for document " + documentId + ": manual review required" };
+      }
+    }
+    return { settled: true };
+  } catch (error) {
+    return { settled: false, reason: "Paperless task evidence unavailable: " + String(error?.message ?? error).slice(0, 120) };
+  }
+}
+
+async function paperlessAiSettled(fetcher, config, documentId) {
+  if (!config.paperlessAiUrl) return { settled: null, reason: "Paperless-AI endpoint not configured" };
+  try {
+    const base = requireHttpUrl(config.paperlessAiUrl, "Paperless-AI");
+    // Paperless-AI native auth is a user-scoped key in x-api-key (see
+    // Engineering/Infrastructure/Paperless operations). Never log the value.
+    const headers = { Accept: "application/json" };
+    if (config.paperlessAiToken) headers["x-api-key"] = config.paperlessAiToken;
+    const statusUrl = new URL("/api/processing/status", base.origin);
+    const statusRes = await fetcher(statusUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
+    const st = await jsonResponse(statusRes, "Paperless-AI");
+    const current = Array.isArray(st?.current) ? st.current : [];
+    if (current.some((c) => Number(c?.documentId ?? c?.id) === documentId)) {
+      return { settled: false, reason: "Paperless-AI still processing document " + documentId };
+    }
+    const queued = Array.isArray(st?.queuedDocumentIds) ? st.queuedDocumentIds : [];
+    if (queued.map(Number).includes(Number(documentId))) {
+      return { settled: false, reason: "Paperless-AI has document " + documentId + " queued" };
+    }
+    const histUrl = new URL("/api/history?documentId=" + documentId + "&pageSize=1", base.origin);
+    const histRes = await fetcher(histUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
+    const hist = await jsonResponse(histRes, "Paperless-AI");
+    const entries = Array.isArray(hist?.entries) ? hist.entries : [];
+    if (entries.length === 0) {
+      return { settled: false, reason: "Paperless-AI has no completion record for document " + documentId };
+    }
+    // Never trust the filter: the record itself must be bound to this document.
+    if (Number(entries[0]?.documentId) !== Number(documentId)) {
+      return { settled: false, reason: "Paperless-AI latest record is not bound to document " + documentId };
+    }
+    const latest = String(entries[0]?.status ?? "").toLowerCase();
+    if (!["done", "success", "succeeded", "applied"].includes(latest)) {
+      return { settled: false, reason: "Paperless-AI latest record for document " + documentId + " is " + latest };
+    }
+    return { settled: true };
+  } catch (error) {
+    return { settled: false, reason: "Paperless-AI evidence unavailable: " + String(error?.message ?? error).slice(0, 120) };
+  }
+}
+
+export async function verifyFinalOcr(fetcher, config, source, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const mode = config.finalizationMode ?? "off";
+  if (mode === "off") return { ok: true, mode, source, evidence: "finalization gate disabled (not qualified for live intake)" };
+  if (mode !== "strict") throw new Error("Unknown finalizationMode: " + String(mode));
+  const maxAttempts = config.finalizationMaxAttempts ?? FINALIZATION_DEFAULTS.maxAttempts;
+  const intervalMs = config.finalizationIntervalMs ?? FINALIZATION_DEFAULTS.intervalMsMs;
+  const stableNeeded = config.finalizationStableReads ?? FINALIZATION_DEFAULTS.stableReads;
+  let prev = source, stable = 1, lastTasks = null, lastAi = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    lastTasks = await paperlessTasksSettled(fetcher, config, source.id);
+    lastAi = await paperlessAiSettled(fetcher, config, source.id);
+    if (lastTasks.settled && lastAi.settled === true && stable >= stableNeeded) {
+      return {
+        ok: true, mode,
+        // The PROVEN revision: callers must draft from this, never from the
+        // pre-gate fetch, or a mid-wait OCR change would run unproven.
+        source: prev,
+        evidence: "tasks settled, AI done, revision " + String(prev.contentHash).slice(0, 12) + " stable x" + stable
+      };
+    }
+    if (attempt >= maxAttempts) break;
+    await sleep(intervalMs);
+    let next;
+    try {
+      next = await getPaperlessText(fetcher, config, source.id);
+    } catch (error) {
+      return { ok: false, mode, reason: "re-fetch during finalization wait failed: " + String(error?.message ?? error).slice(0, 140) };
+    }
+    if (next.contentHash === prev.contentHash && next.modified === prev.modified) stable += 1;
+    else { stable = 1; prev = next; }
+  }
+  if (lastAi.settled === false) return { ok: false, mode, reason: "final OCR not proven: " + lastAi.reason };
+  if (lastAi.settled === null) return { ok: false, mode, reason: "final OCR not proven: Paperless-AI endpoint not configured; manual review required" };
+  if (!lastTasks.settled) return { ok: false, mode, reason: "final OCR not proven: " + lastTasks.reason };
+  return { ok: false, mode, reason: "final OCR not proven: revision not stable across " + maxAttempts + " bounded re-fetches; manual review required" };
+}
+
 export async function extractUsingOpenLyric(fetcher, config, ocrText) {
   if (config.allowCloudProcessing !== true) throw new Error("Cloud receipt processing is disabled");
   const endpoint = apiUrl(config.openLyricUrl, "/v1/chat/completions");
