@@ -210,6 +210,14 @@ function ReceiptDetail() {
         }
       />
 
+      {trip?.receipt?.receipt?.sourcePaperlessDocumentId != null && (
+        <p className="text-xs text-muted-foreground">
+          Source: Paperless document #
+          {trip.receipt.receipt.sourcePaperlessDocumentId} (originals remain
+          in Paperless; review and approval history stays there)
+        </p>
+      )}
+
       {isLoading && (
         <div
           role="status"
@@ -312,6 +320,9 @@ function ReceiptDetail() {
               description: i.description,
               quantity: Number(i.quantity ?? 0),
               unitPrice: Number(i.unitPrice ?? 0),
+              unitOfMeasure: i.unitOfMeasure ?? null,
+              packageContentQuantity: i.packageContentQuantity ?? null,
+              packageContentUnit: i.packageContentUnit ?? null,
               currentClassification: i.currentClassification,
               normalizedDescriptionName: i.normalizedDescriptionName,
               normalizationRevision: i.normalizationRevision,

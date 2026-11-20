@@ -64,6 +64,9 @@ interface ReceiptItem {
   description: string;
   quantity: number;
   unitPrice: number;
+  unitOfMeasure?: string | null;
+  packageContentQuantity?: number | null;
+  packageContentUnit?: string | null;
   currentClassification?: CurrentClassification | null;
   normalizedDescriptionName?: string | null;
   normalizationRevision?: string;
@@ -355,6 +358,8 @@ export function ReceiptItemsCard({
                       </TableCell>
                       <TableCell className="text-right">
                         {item.quantity}
+                        {item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}
+                        {item.packageContentQuantity != null && item.packageContentUnit ? ` (\u00d7 ${item.packageContentQuantity} ${item.packageContentUnit})` : ""}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatUnitPrice(item.unitPrice)}

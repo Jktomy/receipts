@@ -109,4 +109,34 @@ public class UpdateReceiptItemRequestValidatorTests
 		UpdateReceiptItemRequest request = new() { Id = Guid.NewGuid(), UnitPrice = 9.99, Description = "Uncertain item", Quantity = 1, Category = "" };
 		Assert.True(_validator.Validate(request).IsValid);
 	}
+
+	[Fact]
+	public void Should_Pass_When_PackageContentModelsACarton()
+	{
+		UpdateReceiptItemRequest request = new() { Id = Guid.NewGuid(), UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 64, PackageContentUnit = "fl_oz" };
+		Assert.True(_validator.Validate(request).IsValid);
+	}
+
+	[Fact]
+	public void Should_Pass_When_PackageContentModelsACountMultipack()
+	{
+		// EGGS 12 CT $4.50: purchased quantity 1 carton, contents 12 count.
+		UpdateReceiptItemRequest request = new() { Id = Guid.NewGuid(), UnitPrice = 4.50, Description = "EGGS 12 CT", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 12, PackageContentUnit = "count" };
+		Assert.True(_validator.Validate(request).IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_PackageContentUnitMissing()
+	{
+		UpdateReceiptItemRequest request = new() { Id = Guid.NewGuid(), UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "each", PackageContentQuantity = 64, PackageContentUnit = null };
+		FluentValidation.Results.ValidationResult result = _validator.Validate(request);
+		Assert.False(result.IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_UnitIsMassWithPackageContent()
+	{
+		UpdateReceiptItemRequest request = new() { Id = Guid.NewGuid(), UnitPrice = 3.00, Description = "Juice", Quantity = 1, Category = "Food", UnitOfMeasure = "fl_oz", PackageContentQuantity = 64, PackageContentUnit = "fl_oz" };
+		Assert.False(_validator.Validate(request).IsValid);
+	}
 }

@@ -293,7 +293,7 @@ public class ReceiptItemRepository(IDbContextFactory<ApplicationDbContext> conte
 			if (clientRequestId is Guid requestId)
 			{
 				request = await Infrastructure.Services.ReceiptWriteIdempotency.FindOrCreateAsync(context, requestId, "item-create",
-					new { ReceiptId = entities[0].ReceiptId, templates = templateIds, items = entities.Select(value => new { value.Description, value.ReceiptItemCode, value.Quantity, value.UnitPrice, value.TotalAmount, value.UnitPriceCurrency, value.TotalAmountCurrency, value.NormalizationIntent, value.Classification, value.EnvelopeOverrideId, value.OccasionId }) }, cancellationToken);
+					new { ReceiptId = entities[0].ReceiptId, templates = templateIds, items = entities.Select(value => new { value.Description, value.ReceiptItemCode, value.Quantity, value.UnitOfMeasure, value.PackageContentQuantity, value.PackageContentUnit, value.UnitPrice, value.TotalAmount, value.UnitPriceCurrency, value.TotalAmountCurrency, value.NormalizationIntent, value.Classification, value.EnvelopeOverrideId, value.OccasionId }) }, cancellationToken);
 				if (request.ReceiptId != Guid.Empty)
 				{
 					var saved = await context.ReceiptItems.Where(value => request.ItemIds.Contains(value.Id)).ToListAsync(cancellationToken);
@@ -381,6 +381,9 @@ public class ReceiptItemRepository(IDbContextFactory<ApplicationDbContext> conte
 					value.Description,
 					value.ReceiptItemCode,
 					value.Quantity,
+					value.UnitOfMeasure,
+					value.PackageContentQuantity,
+					value.PackageContentUnit,
 					value.UnitPrice,
 					value.UnitPriceCurrency,
 					value.TotalAmount,

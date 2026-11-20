@@ -276,6 +276,24 @@ describe("ReceiptItemsCard", () => {
     expect(screen.getByText("Widget B")).toBeInTheDocument();
   });
 
+  it("shows package content alongside the package quantity", () => {
+    renderWithQueryClient(
+      <ReceiptItemsCard
+        receiptId="receipt-1"
+        items={[
+          {
+            ...mockItems[0],
+            unitOfMeasure: "each",
+            packageContentQuantity: 64,
+            packageContentUnit: "fl_oz",
+          },
+        ]}
+        subtotal={3}
+      />,
+    );
+    expect(screen.getByText(/× 64 fl_oz/)).toBeInTheDocument();
+  });
+
   it("shows an item without a current classification as unresolved, never its legacy labels", () => {
     renderWithQueryClient(
       <ReceiptItemsCard

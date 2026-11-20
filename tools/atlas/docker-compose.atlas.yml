@@ -1,6 +1,16 @@
 # Opt-in Atlas review overlay for the existing Receipts stack.
 # No production workflow is enabled by this file alone.
 services:
+  # Receipts' normal authenticated web/API host keeps the operator key on the
+  # server. Browser clients never call the bridge or see its private secret.
+  app:
+    environment:
+      - AtlasBridge__Url=http://atlas-bridge:8675
+      - AtlasBridge__PaperlessBrowserUrl=${ATLAS_PAPERLESS_BROWSER_URL:-}
+      - AtlasBridge__OperatorKeyFile=/run/secrets/atlas-operator-secret
+    secrets:
+      - atlas-operator-secret
+
   atlas-bridge:
     profiles: ["atlas-review"]
     build:

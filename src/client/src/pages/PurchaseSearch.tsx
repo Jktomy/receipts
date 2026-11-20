@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
 import { formatPurchasePrice } from "@/lib/purchase-search";
+import { toComparableUnitPrice, toDisplayUnitPrice } from "@/lib/unit-prices";
 import { extractErrorMessage } from "@/lib/problem-details";
 
 import { Pagination } from "@/components/Pagination";
@@ -352,8 +353,8 @@ export default function PurchaseSearch() {
         </p>
       )}
       <p className="text-sm text-muted-foreground">
-        Prices are recorded per item; package sizes and measurement units are
-        not standardized.
+        Prices are recorded per item; the comparable column standardizes package
+        sizes and units where the review captured them.
       </p>
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -432,6 +433,9 @@ export default function PurchaseSearch() {
                         />
                       ))}
                       <th scope="col" className="px-4 py-3 font-medium">
+                        Per unit, comparable
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
                         Receipt
                       </th>
                     </tr>
@@ -492,13 +496,35 @@ export default function PurchaseSearch() {
                             true,
                           )}
                         </td>
-                        <td className="px-4 py-3">{item.quantity}</td>
+                        <td className="px-4 py-3">{item.quantity}{item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}{item.packageContentQuantity != null && item.packageContentUnit ? ` × ${item.packageContentQuantity} ${item.packageContentUnit}` : ""}</td>
                         <td className="whitespace-nowrap px-4 py-3 font-mono">
                           {formatPurchasePrice(
                             item.totalAmount,
                             item.totalAmountCurrency,
                           )}
                         </td>
+                        {(() => {
+                          const comparable = toComparableUnitPrice(
+                            item.quantity,
+                            Number(item.unitPrice),
+                            item.unitOfMeasure ?? null,
+                            item.packageContentQuantity ?? null,
+                            item.packageContentUnit ?? null,
+                          );
+                          if (!comparable) {
+                            return (
+                              <td className="whitespace-nowrap px-4 py-3 font-mono">
+                                —
+                              </td>
+                            );
+                          }
+                          const display = toDisplayUnitPrice(comparable);
+                          return (
+                            <td className="whitespace-nowrap px-4 py-3 font-mono">
+                              {`${formatPurchasePrice(display.amount, item.unitPriceCurrency)} / ${display.unit}`}
+                            </td>
+                          );
+                        })()}
                         <td className="whitespace-nowrap px-4 py-3">
                           <Link
                             className="underline"

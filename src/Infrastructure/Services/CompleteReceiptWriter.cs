@@ -7,6 +7,7 @@ using Infrastructure.Mapping;
 using Infrastructure.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 namespace Infrastructure.Services;
 
@@ -18,6 +19,9 @@ public class CompleteReceiptWriter(
 	AdjustmentMapper adjustmentMapper,
 		Microsoft.Extensions.Options.IOptions<Application.Taxonomy.ClassificationOptions>? classificationOptions = null) : ICompleteReceiptWriter
 {
+	private const string SourceIndexName = "IX_Receipts_SourcePaperlessDocumentId";
+	private const int ReplayLookupAttempts = 3;
+	private static readonly TimeSpan ReplayLookupDelay = TimeSpan.FromMilliseconds(100);
 	public Task<CreateCompleteReceiptResult> CreateAsync(Receipt receipt, List<Transaction> transactions, List<ReceiptItem> items,
 		List<Adjustment> adjustments, CancellationToken cancellationToken)
 		=> CreateCoreAsync(receipt, transactions, items, adjustments, null, cancellationToken);
@@ -44,12 +48,14 @@ public class CompleteReceiptWriter(
 			{
 				receipt.Location,
 				receipt.Date,
-				receipt.TaxAmount,
+				TaxAmount = receipt.TaxAmount.Amount,
+				TaxCurrency = receipt.TaxAmount.Currency,
 				receipt.PaidFromEnvelopeId,
 				receipt.OccasionId,
-				transactions = transactions.Select(value => new { value.CardId, value.Amount, value.Date }),
-				items = items.Select(value => new { value.Description, value.ReceiptItemCode, value.Quantity, value.UnitPrice, value.TotalAmount, value.NormalizationIntent, value.Classification, value.EnvelopeOverrideId, value.OccasionId }),
-				adjustments = adjustments.Select(value => new { value.Type, value.Amount, value.Description })
+				receipt.SourcePaperlessDocumentId,
+				transactions = transactions.Select(value => new { value.CardId, TransactionAmount = value.Amount.Amount, TransactionCurrency = value.Amount.Currency, value.Date }),
+				items = items.Select(value => new { value.Description, value.ReceiptItemCode, value.Quantity, value.UnitOfMeasure, value.PackageContentQuantity, value.PackageContentUnit, UnitAmount = value.UnitPrice.Amount, UnitCurrency = value.UnitPrice.Currency, TotalAmount = value.TotalAmount.Amount, TotalCurrency = value.TotalAmount.Currency, value.NormalizationIntent, value.Classification, value.EnvelopeOverrideId, value.OccasionId }),
+				adjustments = adjustments.Select(value => new { value.Type, AdjustmentAmount = value.Amount.Amount, AdjustmentCurrency = value.Amount.Currency, value.Description })
 			}, cancellationToken);
 			if (request.ReceiptId != Guid.Empty)
 			{
@@ -114,7 +120,20 @@ public class CompleteReceiptWriter(
 		// a saved transaction behind a failed create response. Tracking fixes up the cards.
 		List<Guid> cardIds = transactionEntities.Select(entity => entity.CardId).Distinct().ToList();
 		await context.Cards.IgnoreAutoIncludes().Where(card => cardIds.Contains(card.Id)).LoadAsync(cancellationToken);
-		await context.SaveChangesAsync(cancellationToken);
+		try
+		{
+			await context.SaveChangesAsync(cancellationToken);
+		}
+		catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+		{ SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: SourceIndexName }
+			&& receipt.SourcePaperlessDocumentId is long sourceId)
+		{
+			// A replayed Paperless import raced or retried past the request-level
+			// idempotency gate. Roll back the poisoned transaction, then resolve to
+			// the winning receipt in a fresh context so the replay is idempotent.
+			if (transaction is not null) { await transaction.RollbackAsync(cancellationToken); }
+			return await LoadReplayedReceiptAsync(sourceId, clientRequestId, cancellationToken);
+		}
 		await ClassificationService.ApplyAggregateAsync(context, itemEntities, classificationOptions?.Value.WritesEnabled == true, cancellationToken);
 		await CategoryAssistanceObservationWriter.RecordAggregateAsync(context, itemEntities, clientRequestId, cancellationToken);
 		await CurrentClassificationReader.PopulateAsync(context, itemEntities, cancellationToken);
@@ -128,5 +147,30 @@ public class CompleteReceiptWriter(
 		List<Adjustment> createdAdjustments = adjustmentEntities.Select(adjustmentMapper.ToDomain).ToList();
 
 		return new CreateCompleteReceiptResult(createdReceipt, createdTransactions, createdItems, createdAdjustments);
+	}
+
+	private async Task<CreateCompleteReceiptResult> LoadReplayedReceiptAsync(
+		long sourcePaperlessDocumentId, Guid? clientRequestId, CancellationToken cancellationToken)
+	{
+		// Fresh context: the write transaction was rolled back after the unique
+		// violation, so the original context cannot query. A racing winner may not
+		// be visible yet under READ COMMITTED; retry briefly, then fail loudly.
+		for (int attempt = 1; attempt <= ReplayLookupAttempts; attempt++)
+		{
+			await using ApplicationDbContext lookup = await contextFactory.CreateDbContextAsync(cancellationToken);
+			ReceiptEntity? stored = await lookup.Receipts.IgnoreQueryFilters()
+				.SingleOrDefaultAsync(value => value.SourcePaperlessDocumentId == sourcePaperlessDocumentId, cancellationToken);
+			if (stored is not null)
+			{
+				if (stored.DeletedAt is not null) { throw new NormalizationCatalogException(409, "receipt_source_deleted", "This Paperless document already created a receipt that is now deleted. Restore it instead of replaying creation."); }
+				var savedItems = await lookup.ReceiptItems.Where(value => value.ReceiptId == stored.Id).ToListAsync(cancellationToken);
+				var savedTransactions = await lookup.Transactions.Where(value => value.ReceiptId == stored.Id).ToListAsync(cancellationToken);
+				var savedAdjustments = await lookup.Adjustments.Where(value => value.ReceiptId == stored.Id).ToListAsync(cancellationToken);
+				await CurrentClassificationReader.PopulateAsync(lookup, savedItems, cancellationToken);
+				return new(receiptMapper.ToDomain(stored), savedTransactions.Select(transactionMapper.ToDomain).ToList(), savedItems.Select(receiptItemMapper.ToDomain).ToList(), savedAdjustments.Select(adjustmentMapper.ToDomain).ToList());
+			}
+			if (attempt < ReplayLookupAttempts) { await Task.Delay(ReplayLookupDelay, cancellationToken); }
+		}
+		throw new NormalizationCatalogException(409, "receipt_replay_unresolved", "A receipt for this Paperless document was created concurrently but is not yet visible. Retry the import.");
 	}
 }

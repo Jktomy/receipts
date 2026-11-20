@@ -159,6 +159,12 @@ public sealed partial class ClassificationTests
 	{
 		const string migration = "20261026133000_AddPortableSourceRevisionRestore";
 		await using var db = fixture.CreateDbContext();
+		// R03 columns are newer than this fixture's pinned migration; add them manually so the
+		// current model can write. They are invisible to EF migrations, so the downgrade path under test is unchanged.
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"ReceiptItems\" ADD COLUMN IF NOT EXISTS \"UnitOfMeasure\" character varying(16)");
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"ReceiptItems\" ADD COLUMN IF NOT EXISTS \"PackageContentQuantity\" numeric(18,4)");
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"ReceiptItems\" ADD COLUMN IF NOT EXISTS \"PackageContentUnit\" character varying(16)");
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"Receipts\" ADD COLUMN IF NOT EXISTS \"SourcePaperlessDocumentId\" bigint");
 		if (retainedAudit)
 		{
 			var seed = await HistoricalSeedAsync();

@@ -5,8 +5,8 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, exists
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import {
-  getPaperlessText, extractUsingOpenLyric, qualifyItemization,
-  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink
+  getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
+  importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -15,9 +15,15 @@ function validSecret(actual, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function bodyError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function docIdOf(body) {
   const id = Number(body?.documentId ?? body?.sourceId ?? body?.id);
-  if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647) throw new Error("Valid Paperless document ID required");
+  if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647) throw bodyError("Valid Paperless document ID required", 400);
   return id;
 }
 
@@ -32,6 +38,23 @@ function setState(dir, id, state) {
   writeFileSync(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
   renameSync(temp, dest);
 }
+function findOtherClaimant(dir, fireflyTransactionId, exceptId) {
+  // Global one-to-one guard: a single Firefly payment may back at most one
+  // receipt. Reads every draft synchronously (no awaits) so the caller's
+  // check-and-set stays atomic on Node's single thread.
+  let names = [];
+  try { names = readdirSync(dir); } catch { return null; }
+  for (const name of names) {
+    const m = /^paperless-([1-9][0-9]*)\.json$/.exec(name);
+    if (!m) continue;
+    const otherId = Number(m[1]);
+    if (otherId === exceptId) continue;
+    let state = null;
+    try { state = JSON.parse(readFileSync(join(dir, name), "utf8")); } catch { continue; }
+    if (state && state.confirmedFireflyTransactionId === fireflyTransactionId) return otherId;
+  }
+  return null;
+}
 function safeJson(response, status, value) {
   const content = JSON.stringify(value);
   response.writeHead(status, {
@@ -45,9 +68,13 @@ async function jsonBody(request, max = 8000) {
   let text = "";
   for await (const chunk of request) {
     text += chunk.toString("utf8");
-    if (text.length > max) throw new Error("Request body too large");
+    if (text.length > max) throw bodyError("Request body too large", 413);
   }
-  return JSON.parse(text || "{}");
+  try {
+    return JSON.parse(text || "{}");
+  } catch {
+    throw bodyError("Malformed request body: invalid JSON", 400);
+  }
 }
 
 export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir = "./atlas-receipts-data" } = {}) {
@@ -67,17 +94,39 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (previous?.receiptId) {
         const state = source.contentHash === previous.contentHash
           ? { ...previous, status: "IMPORTED" }
-          : { ...previous, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless OCR text changed after import" };
+          // Source changed after import: force re-review and void the payment
+          // confirmation, which described the pre-change source and draft.
+          : { ...previous, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless OCR text changed after import: re-check before relying on the link", confirmedFireflyTransactionId: null, confirmedAt: null };
         setState(dataDir, id, state);
         return;
       }
-      if (previous?.contentHash === source.contentHash && ["READY_FOR_REVIEW", "REVIEW_REQUIRED"].includes(previous.status)) return;
-      const parsed = await extractUsingOpenLyric(fetcher, config, source.content);
+      if (previous?.draft && source.contentHash === previous.contentHash) {
+        // Same OCR revision: never auto-clear a review state or discard corrections.
+        return;
+      }
+      if (previous?.draft && previous?.reviewerEdited) {
+        // OCR changed after a reviewer corrected the draft: keep the corrections and
+        // force re-review against the new text instead of silently replacing them.
+        // Any payment confirmation is void: it was checked against the old source.
+        setState(dataDir, id, {
+          ...previous,
+          contentHash: source.contentHash,
+          modified: source.modified,
+          status: "SOURCE_CHANGED_REVIEW",
+          reason: "Paperless OCR text changed after review: saved corrections need re-check",
+          confirmedFireflyTransactionId: null,
+          confirmedAt: null
+        });
+        return;
+      }
+      const parsed = sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, source.content));
       const qualified = qualifyItemization(parsed, source.content);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
         problems: qualified.problems,
+        draftRevision: (previous?.draftRevision ?? 0) + 1,
+        reviewerEdited: false,
         // No original PDF, card number, bank details or full OCR text stored here.
         draft: parsed
       };
@@ -102,28 +151,56 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     }
   }
 
-  async function importReviewed(id) {
-    if (active.has(id)) return { status: 409, result: { error: "Processing still active" } };
+  async function importReviewed(id, expectedRevision, approval = null) {
+    // Serialize concurrent approvals: the first import wins, the second sees the
+    // recorded receiptId (idempotent replay) instead of posting a duplicate.
+    if (active.has(id)) return { status: 409, result: { error: "Processing still active: retry shortly" } };
     const saved = getState(dataDir, id);
     if (!saved?.draft || !saved?.contentHash) return { status: 404, result: { error: "Draft not found" } };
     if (saved.receiptId) return { status: 200, result: { status: "IMPORTED", receiptId: saved.receiptId } };
-    const current = await getPaperlessText(fetcher, config, id);
-    if (current.contentHash !== saved.contentHash) {
-      setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import" });
-      return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
+    if (saved.status === "SOURCE_CHANGED_REVIEW") {
+      return { status: 409, result: { error: "Source changed after review: correct the draft and save before approving", reason: saved.reason } };
     }
-    const qualified = qualifyItemization(saved.draft, current.content);
-    if (!qualified.ok) return { status: 422, result: { error: "Itemization requires correction", problems: qualified.problems } };
-    const result = await importQualifiedReceipt(fetcher, config, qualified, id);
-    setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
-    return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
+    if (expectedRevision !== undefined && expectedRevision !== (saved.draftRevision ?? null)) {
+      return { status: 409, result: { error: "Draft changed since review: reload the draft before approving" } };
+    }
+    active.add(id);
+    try {
+      const current = await getPaperlessText(fetcher, config, id);
+      if (current.contentHash !== saved.contentHash) {
+        // The checked source is gone: block the import and void any payment
+        // confirmation checked against the old revision.
+        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import", confirmedFireflyTransactionId: null, confirmedAt: null });
+        return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
+      }
+      const qualified = qualifyItemization(saved.draft, current.content);
+      // A low-confidence extraction is importable only with an approval bound to
+      // this draft revision and this exact OCR text, from a reviewer distinct
+      // from the proposing model. Structural findings never become importable.
+      const decision = authorizeImport(qualified, approval, {
+        ocrText: current.content,
+        draftRevision: String(saved.draftRevision ?? ""),
+        proposer: saved.proposedBy ?? null
+      });
+      if (!decision.ok) return { status: 422, result: { error: "Itemization requires correction", problems: decision.problems } };
+      const result = await importQualifiedReceipt(fetcher, config, qualified, id, decision.attestation);
+      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
+      return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
+    } finally {
+      active.delete(id);
+    }
   }
 
   async function matchReviewed(id, sourceAccountId) {
     const saved = getState(dataDir, id);
     if (!saved?.draft || !saved?.contentHash) return { status: 404, result: { error: "Draft not found" } };
     const current = await getPaperlessText(fetcher, config, id);
-    if (current.contentHash !== saved.contentHash) return { status: 409, result: { error: "OCR source revision changed" } };
+    if (current.contentHash !== saved.contentHash) {
+      // The checked source is gone: block the match, mark the draft stale for
+      // re-review, and void any payment confirmation checked against the old revision.
+      setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR source revision changed: re-check before matching", confirmedFireflyTransactionId: null, confirmedAt: null });
+      return { status: 409, result: { error: "OCR source revision changed" } };
+    }
     const qualified = qualifyItemization(saved.draft, current.content);
     if (!qualified.ok) return { status: 422, result: { error: "Receipt is not yet reviewed" } };
     if (!config.fireflyToken || !config.fireflyUrl) return { status: 503, result: { error: "Firefly read-only access not configured" } };
@@ -133,6 +210,48 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     const snapshot = await getFireflyWithdrawals(fetcher, config, start, end);
     const suggestion = suggestFireflyLink(qualified, id, sourceAccountId, snapshot);
     return { status: 200, result: suggestion };
+  }
+
+  async function confirmMatch(id, fireflyTransactionId, fireflySourceAccountId) {
+    // Durable, review-confirmed payment association stored inside the bridge only.
+    // Never writes to Firefly: the suggestion must already be a unique PROPOSED_MATCH
+    // for exactly this transaction, otherwise confirmation is rejected.
+    if (typeof fireflyTransactionId !== "string" || fireflyTransactionId.length < 1 || fireflyTransactionId.length > 80) {
+      return { status: 400, result: { error: "Confirmed Firefly transaction ID is required" } };
+    }
+    // Snapshot before the async Firefly work: a reviewer save or OCR change that
+    // lands mid-flight must not be confirmed against (race guard, checked below).
+    const before = getState(dataDir, id);
+    const beforeRevision = before?.draftRevision ?? null;
+    const beforeHash = before?.contentHash ?? null;
+    const matched = await matchReviewed(id, String(fireflySourceAccountId ?? ""));
+    if (matched.status !== 200) return matched;
+    const suggestion = matched.result;
+    if (suggestion.status !== "PROPOSED_MATCH" || suggestion.fireflyTransactionId !== fireflyTransactionId) {
+      return { status: 409, result: { error: "Confirmed payment does not equal the current unique suggestion: re-check before linking", suggestion } };
+    }
+    // Re-read AFTER Firefly responded: if the revision or source changed while
+    // checking, the suggestion describes a stale draft - conflict, never link.
+    // No awaits between this re-read and setState below, so the store is atomic.
+    const saved = getState(dataDir, id);
+    if ((saved?.draftRevision ?? null) !== beforeRevision || (saved?.contentHash ?? null) !== beforeHash) {
+      return { status: 409, result: { error: "Receipt changed while checking the payment: re-check before linking" } };
+    }
+    // Replay of the same confirmation is idempotent. A different receipt
+    // claiming the same payment is rejected: one-to-one, globally enforced.
+    if (saved?.confirmedFireflyTransactionId === fireflyTransactionId) {
+      return { status: 200, result: { status: "MATCH_CONFIRMED", fireflyTransactionId } };
+    }
+    const other = findOtherClaimant(dataDir, fireflyTransactionId, id);
+    if (other !== null) {
+      return { status: 409, result: { error: "Firefly payment already linked to another receipt: review before linking", claimedByPaperlessId: other } };
+    }
+    setState(dataDir, id, {
+      ...saved,
+      confirmedFireflyTransactionId: fireflyTransactionId,
+      confirmedAt: new Date().toISOString()
+    });
+    return { status: 200, result: { status: "MATCH_CONFIRMED", fireflyTransactionId } };
   }
 
   const server = createServer(async (request, response) => {
@@ -161,7 +280,29 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         }
         return safeJson(response, 202, { paperlessId: id, status: "ACCEPTED" });
       }
-      const match = /^\/drafts\/([1-9][0-9]*)(?:\/(import|match))?$/.exec(path);
+      if (request.method === "GET" && path === "/drafts") {
+        // Bounded operator queue; no originals or full OCR are in this state.
+        const ids = readdirSync(dataDir)
+          .filter(name => /^paperless-[1-9][0-9]*[.]json$/.test(name))
+          .map(name => Number(name.slice(10, -5)))
+          .filter(Number.isSafeInteger)
+          .sort((a, b) => b - a)
+          .slice(0, 100);
+        const drafts = ids.map(id => {
+          const state = getState(dataDir, id);
+          return state && {
+            paperlessId: id, status: state.status, modified: state.modified,
+            problems: state.problems ?? [], receiptId: state.receiptId ?? null,
+            draftRevision: state.draftRevision ?? null,
+            confirmedFireflyTransactionId: state.confirmedFireflyTransactionId ?? null,
+            merchant: state.draft?.merchant ?? null,
+            date: state.draft?.date ?? null,
+            total: state.draft?.total ?? null
+          };
+        }).filter(Boolean);
+        return safeJson(response, 200, { drafts, limit: 100 });
+      }
+      const match = /^\/drafts\/([1-9][0-9]*)(?:\/(import|match|confirm-match))?$/.exec(path);
       if (!match) return safeJson(response, 404, { error: "Not found" });
       const id = Number(match[1]);
       if (!Number.isSafeInteger(id) || id > 2147483647) return safeJson(response, 400, { error: "Invalid document ID" });
@@ -172,13 +313,45 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       if (request.method === "PUT" && !match[2]) {
         const previous = getState(dataDir, id);
         if (!previous?.contentHash || previous.receiptId) return safeJson(response, 409, { error: "No editable pending draft" });
+        if (active.has(id)) return safeJson(response, 409, { error: "Processing still active: retry shortly" });
         const edited = await jsonBody(request, 100000);
+        // Compare-and-swap: the saver must name the revision it edited, so a
+        // second reviewer's save cannot silently overwrite the first.
+        const expectedSave = edited?.expectedRevision;
+        if (!Number.isSafeInteger(expectedSave) || expectedSave < 1) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to save corrections" });
+        }
+        if (expectedSave !== (previous.draftRevision ?? null)) {
+          return safeJson(response, 409, { error: "Draft changed since you loaded it: reload before saving", draftRevision: previous.draftRevision ?? null });
+        }
+        const draftRevision = (previous.draftRevision ?? 0) + 1;
         // Still checked against immutable OCR evidence at import time.
-        setState(dataDir, id, { ...previous, draft: edited, status: "READY_FOR_REVIEW", problems: [] });
-        return safeJson(response, 200, { status: "DRAFT_UPDATED" });
+        // Any edit voids a prior payment confirmation: it was checked against
+        // the pre-edit draft, so the reviewer must re-check before approval.
+        const confirmationInvalidated = previous.confirmedFireflyTransactionId != null;
+        setState(dataDir, id, { ...previous, draft: sanitizePurchaseDraft(edited), status: "READY_FOR_REVIEW", problems: [], reviewerEdited: true, draftRevision, confirmedFireflyTransactionId: null, confirmedAt: null });
+        return safeJson(response, 200, { status: "DRAFT_UPDATED", draftRevision, confirmationInvalidated });
       }
       if (request.method === "POST" && match[2] === "import") {
-        const result = await importReviewed(id);
+        // Explicit revision required: the approver must name the exact draft
+        // revision reviewed. No silent legacy path: an approval without a
+        // named revision is rejected instead of importing whatever is newest.
+        const importBody = await jsonBody(request, 1000);
+        if (!Number.isSafeInteger(importBody?.expectedRevision) || importBody.expectedRevision < 1) {
+          return safeJson(response, 400, { error: "Expected draft revision is required to approve an import" });
+        }
+        // Reviewer identity comes from the authenticated API layer's stamped
+        // header, never from the request body; the body supplies only the
+        // binding evidence (timestamp, OCR digest, draft revision).
+        // Reviewer identity is stamped into the body by the authenticated API
+        // layer; the header is only a fallback for direct operator calls.
+        const review = importBody?.review;
+        const reviewer = (typeof review?.reviewer === "string" ? review.reviewer.trim() : "") ||
+          String(request.headers["x-atlas-reviewer"] ?? "").trim();
+        const approval = review && typeof review === "object"
+          ? { reviewer, approvedAt: review.approvedAt, ocrSha256: review.ocrSha256, draftRevision: review.draftRevision }
+          : null;
+        const result = await importReviewed(id, importBody.expectedRevision, approval);
         return safeJson(response, result.status, result.result);
       }
       if (request.method === "POST" && match[2] === "match") {
@@ -186,18 +359,24 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         const result = await matchReviewed(id, String(body.fireflySourceAccountId ?? ""));
         return safeJson(response, result.status, result.result);
       }
+      if (request.method === "POST" && match[2] === "confirm-match") {
+        const body = await jsonBody(request, 1000);
+        const result = await confirmMatch(id, body?.fireflyTransactionId, body?.fireflySourceAccountId);
+        return safeJson(response, result.status, result.result);
+      }
       return safeJson(response, 405, { error: "Method not allowed" });
     } catch (error) {
       // No tokens, OCR, model output, or payment data in errors/logs.
       const reason = error instanceof Error ? error.message : "Unexpected error";
-      return safeJson(response, 422, { error: reason.slice(0, 160) });
+      const status = error instanceof Error && Number.isSafeInteger(error.statusCode) ? error.statusCode : 422;
+      return safeJson(response, status, { error: reason.slice(0, 160) });
     }
   });
 
   // Pending work is intentionally not auto-replayed after an unclean restart.
   // Paperless's native manual workflow and re-tagging can retrigger an ID safely.
   // Avoid claiming unattended durable recovery without a proper queue.
-  return { server, processDocument, importReviewed, matchReviewed, state: id => getState(dataDir, id) };
+  return { server, processDocument, importReviewed, matchReviewed, confirmMatch, state: id => getState(dataDir, id) };
 }
 
 function secret(name) {

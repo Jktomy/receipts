@@ -17,6 +17,7 @@ import ClassificationWorkspace from "@/pages/ClassificationWorkspace";
 import CategoryAssistanceSettings from "@/pages/settings/CategoryAssistanceSettings";
 import RestructureCategories from "@/pages/RestructureCategories";
 import Receipts from "@/pages/Receipts";
+import PaperlessInbox from "@/pages/PaperlessInbox";
 import Reports from "@/pages/Reports";
 import PurchaseSearch from "@/pages/PurchaseSearch";
 import ReceiptDetail from "@/pages/ReceiptDetail";
@@ -85,6 +86,7 @@ export const routeConfig = [
           },
           { path: "/subcategories", element: <CategoryRedirect /> },
           { path: "/receipts", element: <Receipts /> },
+          { path: "/admin/paperless-inbox", element: <AdminRoute><PaperlessInbox /></AdminRoute> },
           { path: "/receipts/new", element: <NewReceipt /> },
           {
             path: "/item-templates",

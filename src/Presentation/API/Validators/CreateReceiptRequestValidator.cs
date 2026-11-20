@@ -10,6 +10,8 @@ public class CreateReceiptRequestValidator : AbstractValidator<CreateReceiptRequ
 
 	public const string LocationMustNotBeEmpty = "Location must not be empty.";
 
+	public const string SourcePaperlessDocumentIdOutOfRange = "Paperless document ID is out of range.";
+
 	public CreateReceiptRequestValidator(AdmissionDatePolicy datePolicy)
 	{
 		RuleFor(x => x.Location)
@@ -19,5 +21,9 @@ public class CreateReceiptRequestValidator : AbstractValidator<CreateReceiptRequ
 		RuleFor(x => x.Date)
 			.Must(datePolicy.IsNotFuture)
 			.WithMessage(DateMustBePriorToCurrentDate);
+
+		RuleFor(x => x.SourcePaperlessDocumentId)
+			.Must(id => id is null || (id >= 1 && id <= 2147483647))
+			.WithMessage(SourcePaperlessDocumentIdOutOfRange);
 	}
 }

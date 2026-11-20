@@ -50,6 +50,91 @@ function normalizeDescription(v) {
 const allowedAdjustments = new Set(["tip", "discount", "rounding", "loyaltyRedemption", "coupon", "storeCredit", "other"]);
 const debitAdjustments = new Set(["discount", "loyaltyRedemption", "coupon", "storeCredit"]);
 
+export const canonicalUnits = new Set(["each", "count", "g", "kg", "oz", "lb", "ml", "l", "fl_oz", "cup", "pt", "qt", "gal"]);
+
+const unitAliases = {
+  each: "each", ea: "each",
+  count: "count", ct: "count",
+  g: "g", gram: "g", grams: "g",
+  kg: "kg", kilo: "kg", kilos: "kg", kilogram: "kg", kilograms: "kg",
+  oz: "oz", ounce: "oz", ounces: "oz",
+  lb: "lb", lbs: "lb", pound: "lb", pounds: "lb",
+  ml: "ml", milliliter: "ml", milliliters: "ml", millilitre: "ml", millilitres: "ml",
+  l: "l", liter: "l", liters: "l", litre: "l", litres: "l",
+  fl_oz: "fl_oz", floz: "fl_oz",
+  cup: "cup", cups: "cup",
+  pt: "pt", pint: "pt", pints: "pt",
+  qt: "qt", quart: "qt", quarts: "qt",
+  gal: "gal", gallon: "gal", gallons: "gal"
+};
+
+/**
+ * Normalize an OCR/model unit spelling to the canonical catalog.
+ * Returns the canonical unit, null when absent, or undefined when the
+ * spelling is not recognized (caller must then require review, never guess).
+ */
+export function normalizeUnit(raw) {
+  if (raw === undefined || raw === null) return null;
+  const key = String(raw).trim().toLowerCase().replace(/[.]+$/, "");
+  if (key === "") return null;
+  if (canonicalUnits.has(key)) return key;
+  return unitAliases[key];
+}
+
+const unitDimensions = {
+  each: "count", count: "count",
+  g: "mass", kg: "mass", oz: "mass", lb: "mass",
+  ml: "volume", l: "volume", fl_oz: "volume",
+  cup: "volume", pt: "volume", qt: "volume", gal: "volume"
+};
+
+/** Count, mass or volume for a canonical unit; undefined when unknown. */
+export function dimensionOfUnit(raw) {
+  const normalized = normalizeUnit(raw);
+  if (normalized === null || normalized === undefined) return normalized;
+  return unitDimensions[normalized];
+}
+
+/**
+ * Persist only the defined purchase fields. Model responses and operator
+ * corrections are not allowed to introduce account numbers, narrative notes,
+ * hidden instruction fields, or arbitrary personally identifying metadata.
+ */
+export function sanitizePurchaseDraft(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid purchase draft");
+  const pick = (v, n = 300) => typeof v === "string" ? v.slice(0, n) : "";
+  // Quantities may arrive as JSON numbers; preserve them as text without
+  // inventing a default. A missing quantity stays empty for review.
+  const pickAmount = (v, n = 30) => typeof v === "string" ? v.slice(0, n) :
+    (typeof v === "number" && Number.isFinite(v) ? String(v).slice(0, n) : "");
+  return {
+    merchant: pick(raw.merchant, 180),
+    merchantEvidence: pick(raw.merchantEvidence),
+    date: pick(raw.date, 10),
+    dateEvidence: pick(raw.dateEvidence),
+    total: pick(raw.total, 30),
+    totalEvidence: pick(raw.totalEvidence),
+    tax: pick(raw.tax ?? "0", 30),
+    currency: pick(raw.currency ?? "USD", 3),
+    confidence: pick(raw.confidence, 10),
+    hasRefunds: raw.hasRefunds === true,
+    mixedTender: raw.mixedTender === true,
+    items: Array.isArray(raw.items) ? raw.items.slice(0, 200).map(item => ({
+      description: pick(item?.description, 200), sku: pick(item?.sku, 80),
+      evidence: pick(item?.evidence, 300),
+      quantity: pickAmount(item?.quantity, 30),
+      unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30),
+      unit: pick(item?.unit, 16),
+      packageContentQuantity: pickAmount(item?.packageContentQuantity, 30),
+      packageContentUnit: pick(item?.packageContentUnit, 16)
+    })) : [],
+    adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
+      type: pick(adjustment?.type, 30), amount: pick(adjustment?.amount, 30),
+      description: pick(adjustment?.description, 200)
+    })) : []
+  };
+}
+
 export function qualifyItemization(raw, ocrText) {
   const problems = [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, problems: ["No structured document"] };
@@ -72,8 +157,15 @@ export function qualifyItemization(raw, ocrText) {
   for (const rawItem of Array.isArray(raw.items) ? raw.items.slice(0, 200) : []) {
     const description = normalizeDescription(rawItem?.description);
     let quantity, unitPrice, extended;
+    // Never invent a purchase count: a missing quantity stays unknown and
+    // fails qualification for human review instead of defaulting to 1.
+    const quantityText = rawItem?.quantity;
+    if (quantityText === undefined || quantityText === null || String(quantityText).trim() === "") {
+      problems.push("Purchase quantity requires review");
+      continue;
+    }
     try {
-      quantity = quantityTenThousandths(rawItem?.quantity ?? "1");
+      quantity = quantityTenThousandths(quantityText);
       unitPrice = unitPriceTenThousandths(rawItem?.unitPrice);
       extended = moneyCents(rawItem?.total, { allowZero: false });
       // Both quantity and unit price have four-decimal precision in Receipts.
@@ -91,7 +183,39 @@ export function qualifyItemization(raw, ocrText) {
       problems.push("Item lacks verbatim source evidence");
     }
     const code = typeof rawItem?.sku === "string" ? rawItem.sku.slice(0, 80) : null;
-    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code });
+    const unitOfMeasure = normalizeUnit(rawItem?.unit);
+    if (rawItem?.unit !== undefined && rawItem?.unit !== null && String(rawItem.unit).trim() !== "" && unitOfMeasure === undefined) {
+      problems.push("Unit needs review");
+    }
+    // Package content: when present, quantity counts packages and the content
+    // carries the measurable amount inside each package (e.g. 64 fl_oz per
+    // carton). The item unit must then count packages, never a mass/volume.
+    let packageContentQuantity = null, packageContentUnit = null;
+    const contentQtyText = rawItem?.packageContentQuantity;
+    const contentUnitText = rawItem?.packageContentUnit;
+    const hasContent = (contentQtyText !== undefined && contentQtyText !== null && String(contentQtyText).trim() !== "") ||
+      (contentUnitText !== undefined && contentUnitText !== null && String(contentUnitText).trim() !== "");
+    if (hasContent) {
+      try {
+        const parsed = quantityTenThousandths(contentQtyText);
+        packageContentQuantity = Number(parsed) / 10000;
+      } catch {
+        problems.push("Package content quantity requires review");
+      }
+      packageContentUnit = normalizeUnit(contentUnitText);
+      if (packageContentUnit === undefined || packageContentUnit === null) {
+        problems.push("Package content unit requires review");
+      } else {
+        const contentDimension = dimensionOfUnit(packageContentUnit);
+        if (contentDimension !== "count" && contentDimension !== "mass" && contentDimension !== "volume") {
+          problems.push("Package content unit requires review");
+        }
+      }
+      if (unitOfMeasure !== null && unitOfMeasure !== "each" && unitOfMeasure !== "count") {
+        problems.push("Unit must count packages when package content is set");
+      }
+    }
+    items.push({ description, quantity: Number(quantity) / 10000, unitPrice: Number(unitPrice) / 10000, receiptItemCode: code, unitOfMeasure, packageContentQuantity, packageContentUnit });
     subtotal += extended;
   }
   const adjustments = [];
@@ -120,6 +244,63 @@ export function qualifyItemization(raw, ocrText) {
   };
 }
 
+export const LOW_CONFIDENCE_PROBLEM = "Model did not attest high confidence";
+
+export function attestationDigest(ocrText) {
+  return createHash("sha256").update(String(ocrText ?? ""), "utf8").digest("hex");
+}
+
+// An approval is evidence only for the exact draft it names: same OCR bytes,
+// same draft revision, reviewer distinct from the proposing model. Anything
+// else is stale or missing and must block the import.
+export function verifyReviewAttestation(attestation, { ocrText, draftRevision, proposer } = {}) {
+  if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)) {
+    return { ok: false, problems: ["Reviewer approval is required for a low-confidence extraction"] };
+  }
+  const problems = [];
+  const reviewer = typeof attestation.reviewer === "string" ? attestation.reviewer.trim() : "";
+  if (!reviewer) problems.push("Reviewer identity is missing");
+  if (proposer && reviewer && reviewer.toLowerCase() === String(proposer).trim().toLowerCase()) {
+    problems.push("Reviewer must differ from the proposer");
+  }
+  if (!attestation.approvedAt || Number.isNaN(Date.parse(attestation.approvedAt))) {
+    problems.push("Approval timestamp is missing or invalid");
+  }
+  if (typeof attestation.draftRevision !== "string" || attestation.draftRevision === "") {
+    problems.push("Approval is not bound to a draft revision");
+  } else if (attestation.draftRevision !== String(draftRevision)) {
+    problems.push("Approval is stale: draft revision changed");
+  }
+  const expected = attestationDigest(ocrText);
+  if (typeof attestation.ocrSha256 !== "string" || !/^[0-9a-f]{64}$/.test(attestation.ocrSha256)) {
+    problems.push("Approval is not bound to the source OCR");
+  } else if (attestation.ocrSha256 !== expected) {
+    problems.push("Approval is stale: source OCR changed");
+  }
+  return { ok: problems.length === 0, problems, reviewer, ocrSha256: expected };
+}
+
+// Only the model's confidence finding is approvable. Structural findings
+// (math, evidence, units, reconciliation) never become importable by approval.
+export function authorizeImport(qualified, attestation, context = {}) {
+  if (qualified?.ok) return { ok: true, approved: false, problems: [] };
+  const remaining = (qualified?.problems ?? []).filter(problem => problem !== LOW_CONFIDENCE_PROBLEM);
+  if (remaining.length > 0 || (qualified?.problems ?? []).length === 0) {
+    return { ok: false, approved: false, problems: remaining.length ? remaining : ["Receipt did not qualify"] };
+  }
+  const review = verifyReviewAttestation(attestation, context);
+  if (!review.ok) return { ok: false, approved: false, problems: review.problems };
+  return {
+    ok: true, approved: true, problems: [],
+    attestation: {
+      reviewer: review.reviewer,
+      approvedAt: new Date(attestation.approvedAt).toISOString(),
+      ocrSha256: review.ocrSha256,
+      draftRevision: String(context.draftRevision)
+    }
+  };
+}
+
 export function stableSourceRequestId(instance, paperlessId) {
   // RFC 4122 variant/version 5-compatible shape from a stable SHA-256 prefix.
   const hex = createHash("sha256").update("atlas-receipt-v1\0" + instance + "\0" + String(paperlessId)).digest("hex");
@@ -127,11 +308,19 @@ export function stableSourceRequestId(instance, paperlessId) {
     "-a" + hex.slice(17, 20) + "-" + hex.slice(20, 32);
 }
 
-export function toCompleteReceiptRequest(qualified, instance, paperlessId) {
-  if (!qualified.ok) throw new Error("Unqualified receipt cannot be imported");
+export function toCompleteReceiptRequest(qualified, instance, paperlessId, attestation = null) {
+  // A low-confidence draft is importable only with an attestation that
+  // authorizeImport already validated; structural findings never are.
+  const approvalBound = attestation && typeof attestation.reviewer === "string" && attestation.reviewer !== "" &&
+    typeof attestation.ocrSha256 === "string" && typeof attestation.draftRevision === "string";
+  const approvable = !qualified.ok && approvalBound &&
+    (qualified.problems ?? []).every(problem => problem === LOW_CONFIDENCE_PROBLEM);
+  if (!qualified.ok && !approvable) throw new Error("Unqualified receipt cannot be imported");
   return {
     clientRequestId: stableSourceRequestId(instance, paperlessId),
-    receipt: qualified.receipt, items: qualified.items,
+    reviewAttestation: attestation,
+    receipt: { ...qualified.receipt, sourcePaperlessDocumentId: paperlessId },
+    items: qualified.items.map(item => ({ ...item })),
     adjustments: qualified.adjustments,
     transactions: [] // The existing Midas writer remains authoritative for Firefly.
   };
@@ -180,8 +369,10 @@ const extractionRules = [
   "Return ONE JSON object, not markdown, with merchant, date (YYYY-MM-DD), total, tax, currency USD,",
   "confidence ('high' only if all figures and line evidence are clear), hasRefunds, mixedTender,",
   "merchantEvidence, dateEvidence, totalEvidence: short verbatim substrings of the supplied OCR.",
-  "items array of {description, sku, quantity, unitPrice, total, evidence}, and adjustments array",
+  "items array of {description, sku, quantity, unitPrice, total, unit, packageContentQuantity, packageContentUnit, evidence}, and adjustments array",
   "of {type, amount, description}. Totals, tax and adjustments must be decimal strings with two decimals; quantity and unitPrice may use four decimals.",
+  "Quantity counts purchased packages (1 for one carton); packageContentQuantity/Unit carry the measurable amount inside each package",
+  "(for example 12 count for a 12-egg carton, or 64 fl_oz for a juice carton). Leave package fields empty when the OCR does not state them.",
   "Each evidence must be copied verbatim from a line in the supplied OCR.",
   "Separate signed discounts and coupons into adjustments (negative amounts); use tip/other for additions.",
   "Never invent products, categories, quantities, card numbers, account IDs, or missing amounts.",
@@ -212,9 +403,9 @@ export async function extractUsingOpenLyric(fetcher, config, ocrText) {
   return parsed;
 }
 
-export async function importQualifiedReceipt(fetcher, config, qualified, paperlessId) {
+export async function importQualifiedReceipt(fetcher, config, qualified, paperlessId, attestation = null) {
   const endpoint = apiUrl(config.receiptsUrl, "/api/receipts/complete");
-  const payload = toCompleteReceiptRequest(qualified, config.paperlessInstance, paperlessId);
+  const payload = toCompleteReceiptRequest(qualified, config.paperlessInstance, paperlessId, attestation);
   const response = await fetcher(endpoint, {
     method: "POST", headers: { "X-API-Key": config.receiptsApiKey, "Content-Type": "application/json" },
     body: JSON.stringify(payload), redirect: "error", signal: AbortSignal.timeout(25000)

@@ -475,7 +475,7 @@ it("shows length validation only when a submitted query needs it", async () => {
   );
   expect(
     screen.getByText(
-      /package sizes and measurement units are not standardized/,
+      /the comparable column standardizes package sizes/,
     ),
   ).toBeInTheDocument();
 });
@@ -601,4 +601,57 @@ it("shows the API reason when a captured hierarchy revision is invalid", () => {
   expect(
     screen.getByText("The captured taxonomy revision is unavailable."),
   ).toBeInTheDocument();
+});
+
+it("shows comparable per-unit prices and units without merging variants", async () => {
+  search.mockReturnValue(
+    mockQueryResult({
+      isPending: false,
+      data: {
+        categoryView: "asClassified",
+        assignmentSelection: "currentPointer",
+        items: [
+          {
+            ...item,
+            id: "item-gal",
+            description: "Whole milk gallon",
+            quantity: 1,
+            unitPrice: 3.99,
+            unitOfMeasure: "each",
+            packageContentQuantity: 1,
+            packageContentUnit: "gal",
+          },
+          {
+            ...item,
+            id: "item-plain",
+            description: "Eggs dozen",
+            quantity: 1,
+            unitPrice: 4.5,
+            unitOfMeasure: null,
+          },
+          {
+            ...item,
+            id: "item-ambiguous",
+            description: "Juice carton, unit unclear",
+            quantity: 1,
+            unitPrice: 3.0,
+            unitOfMeasure: "fl_oz",
+            packageContentQuantity: null,
+            packageContentUnit: null,
+          },
+        ],
+        total: 3,
+        offset: 0,
+        limit: 25,
+      },
+    }),
+  );
+  renderPage("/search?q=milk");
+  expect(await screen.findByText("Per unit, comparable")).toBeInTheDocument();
+  expect(screen.getByText("1 each × 1 gal")).toBeInTheDocument();
+  expect(screen.getByText("USD 0.11 / 100 ml")).toBeInTheDocument();
+  expect(screen.getByText("USD 4.50 / each")).toBeInTheDocument();
+  // Bare mass/volume without package content is never labeled comparable.
+  expect(screen.getByText("Juice carton, unit unclear")).toBeInTheDocument();
+  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
 });

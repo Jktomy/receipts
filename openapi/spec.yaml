@@ -12284,6 +12284,16 @@ components:
         unitPriceCurrency:
           type: string
           description: Stored currency code without conversion.
+        unitOfMeasure:
+          type: ["string", "null"]
+          description: Canonical unit for quantity, or null for a plain countable item.
+        packageContentQuantity:
+          type: ["number", "null"]
+          format: double
+          description: Measurable amount inside each package (e.g. 64 for a 64 fl oz carton). When set, quantity counts packages. Null means quantity is the measured amount.
+        packageContentUnit:
+          type: ["string", "null"]
+          description: Canonical mass/volume unit for the package content (g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). Null when there is no package content.
         totalAmount:
           type: number
           format: double
@@ -14204,6 +14214,10 @@ components:
         taxAmount:
           type: number
           format: double
+        sourcePaperlessDocumentId:
+          type: ["integer", "null"]
+          format: int64
+          description: Optional Paperless-ngx document ID this receipt was imported from. Stored for drill-down to the original document; never a financial reference.
 
     UpdateReceiptRequest:
       type: object
@@ -14252,6 +14266,10 @@ components:
         taxAmount:
           type: number
           format: double
+        sourcePaperlessDocumentId:
+          type: ["integer", "null"]
+          format: int64
+          description: Paperless-ngx document ID this receipt was imported from, if any.
 
     ReceiptListResponse:
       type: object
@@ -14588,6 +14606,16 @@ components:
           type: ["string", "null"]
           format: uuid
           description: Optional provenance hint. A legacy template link does not verify the purchase; explicit source-bound selection or an approved scoped mapping is required.
+        unitOfMeasure:
+          type: ["string", "null"]
+          description: Optional canonical unit for quantity (each, count, g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal).
+        packageContentQuantity:
+          type: ["number", "null"]
+          format: double
+          description: Optional measurable amount inside each package. When set, quantity counts packages and the unit must count packages (each/count).
+        packageContentUnit:
+          type: ["string", "null"]
+          description: Optional canonical mass/volume for the package content. Null means a plain countable item. Enables comparable per-unit pricing across package sizes; variants are never merged on unit alone.
 
     UpdateReceiptItemRequest:
       type: object
@@ -14627,6 +14655,16 @@ components:
         category:
           type: ["string", "null"]
           description: Retired legacy label. Accepted for older clients and ignored; an edit never changes the stored label.
+        unitOfMeasure:
+          type: ["string", "null"]
+          description: Optional canonical unit for quantity (each, count, g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal).
+        packageContentQuantity:
+          type: ["number", "null"]
+          format: double
+          description: Optional measurable amount inside each package. When set, quantity counts packages and the unit must count packages (each/count).
+        packageContentUnit:
+          type: ["string", "null"]
+          description: Optional canonical mass/volume for the package content. Null keeps the stored unit.
         subcategory:
           type: ["string", "null"]
           description: Retired legacy label. Accepted for older clients and ignored.
@@ -14690,6 +14728,16 @@ components:
         unitPrice:
           type: number
           format: double
+        unitOfMeasure:
+          type: ["string", "null"]
+          description: Canonical unit for quantity, or null for a plain countable item.
+        packageContentQuantity:
+          type: ["number", "null"]
+          format: double
+          description: Measurable amount inside each package (e.g. 64 for a 64 fl oz carton). When set, quantity counts packages. Null means quantity is the measured amount.
+        packageContentUnit:
+          type: ["string", "null"]
+          description: Canonical mass/volume unit for the package content (g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). Null when there is no package content.
         category:
           type: string
           description: Legacy label kept only so an edit can send it back unchanged. Display currentClassification instead.

@@ -35,6 +35,9 @@ vi.mock("@/pages/Taxonomy", () => ({
 vi.mock("@/pages/Receipts", () => ({
   default: () => <div data-testid="page-receipts">Receipts</div>,
 }));
+vi.mock("@/pages/PaperlessInbox", () => ({
+  default: () => <div data-testid="page-paperless-inbox">Paperless Inbox</div>,
+}));
 vi.mock("@/pages/ReceiptDetail", () => ({
   default: () => <div data-testid="page-receipt-detail">ReceiptDetail</div>,
 }));
@@ -151,6 +154,12 @@ describe("App router", () => {
   it('renders Reports page at "/reports" route', async () => {
     renderRoute("/reports");
     expect(await screen.findByTestId("page-reports")).toBeInTheDocument();
+  });
+
+  it("guards the Paperless Inbox with the administrator route", async () => {
+    renderRoute("/admin/paperless-inbox");
+    const page = await screen.findByTestId("page-paperless-inbox");
+    expect(screen.getByTestId("admin-route")).toContainElement(page);
   });
 
   it('renders NewReceipt page at "/receipts/new" route', async () => {

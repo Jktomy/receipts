@@ -230,6 +230,43 @@ describe("ReceiptDetail", () => {
     expect(screen.getByText(/2024-01-15/)).toBeInTheDocument();
   });
 
+  it("shows the Paperless source document when the receipt was imported", async () => {
+    const { useTripByReceiptId } = await import("@/hooks/useTrips");
+    vi.mocked(useTripByReceiptId).mockReturnValue(
+      mockQueryResult({
+        data: {
+          ...MOCK_TRIP,
+          receipt: {
+            ...MOCK_TRIP.receipt,
+            receipt: {
+              ...MOCK_TRIP.receipt.receipt,
+              sourcePaperlessDocumentId: 44,
+            },
+          },
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    );
+
+    renderWithRoutes("/receipts/r1");
+    expect(screen.getByText(/Paperless document #44/)).toBeInTheDocument();
+  });
+
+  it("hides the source line for receipts without a Paperless import", async () => {
+    const { useTripByReceiptId } = await import("@/hooks/useTrips");
+    vi.mocked(useTripByReceiptId).mockReturnValue(
+      mockQueryResult({
+        data: MOCK_TRIP,
+        isLoading: false,
+        isError: false,
+      }),
+    );
+
+    renderWithRoutes("/receipts/r1");
+    expect(screen.queryByText(/Paperless document #/)).not.toBeInTheDocument();
+  });
+
   it("renders error state with alert role when receipt is not found", async () => {
     const { useTripByReceiptId } = await import("@/hooks/useTrips");
     vi.mocked(useTripByReceiptId).mockReturnValue(

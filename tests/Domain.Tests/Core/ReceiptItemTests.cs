@@ -149,4 +149,17 @@ public class ReceiptItemTests
 		Assert.Equal("", item.Category);
 		Assert.Null(item.Subcategory);
 	}
+
+	[Fact]
+	public void Constructor_CountPackageContent_PreservesPurchaseQuantitySeparately()
+	{
+		// EGGS 12 CT $4.50: purchased quantity 1 carton, contents 12 count,
+		// package price $4.50. Quantity and contents must never be confused.
+		ReceiptItem item = new(Guid.NewGuid(), null, "EGGS 12 CT", 1, new Money(4.50m), new Money(4.50m), "Food", null, "each", 12, "count");
+		Assert.Equal(1, item.Quantity);
+		Assert.Equal(4.50m, item.UnitPrice.Amount);
+		Assert.Equal("each", item.UnitOfMeasure);
+		Assert.Equal(12, item.PackageContentQuantity);
+		Assert.Equal("count", item.PackageContentUnit);
+	}
 }

@@ -18,6 +18,11 @@ public class ReceiptItem
 	public string Description { get; set; }
 	public decimal Quantity { get; set; }
 	public Money UnitPrice { get; set; }
+	/// <summary>Canonical unit for <see cref="Quantity"/> (see <see cref="UnitCatalog"/>). Null means a plain countable item.</summary>
+	public string? UnitOfMeasure { get; set; }
+	/// <summary>Measurable amount inside each package (e.g. 64 for a 64 fl oz carton). When set, <see cref="Quantity"/> counts packages and <see cref="PackageContentUnit"/> carries the unit. Null means <see cref="Quantity"/> is the measured amount.</summary>
+	public decimal? PackageContentQuantity { get; set; }
+	public string? PackageContentUnit { get; set; }
 	public Money TotalAmount { get; set; }
 	// Category/Subcategory are stored as denormalized strings (not FK references).
 	// This is intentional: values capture the historical categorization at time of entry,
@@ -44,8 +49,12 @@ public class ReceiptItem
 	public const string CategoryCannotBeEmpty = "Category cannot be empty";
 	public const string UnitPriceMustBePositive = "Unit price must be positive";
 	public const string TotalAmountExceedsTolerance = "Total amount must be within $0.01 of quantity times unit price";
+	public const string UnitOfMeasureNotInCatalog = "Unit of measure is not a known unit.";
+	public const string PackageContentQuantityMustBePositive = "Package content quantity must be positive.";
+	public const string PackageContentUnitNotInCatalog = "Package content unit is not a known count, mass or volume.";
+	public const string PackageUnitMustCountPackages = "Unit must count packages when package content is set.";
 
-	public ReceiptItem(Guid id, string? receiptItemCode, string description, decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory)
+	public ReceiptItem(Guid id, string? receiptItemCode, string description, decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory, string? unitOfMeasure = null, decimal? packageContentQuantity = null, string? packageContentUnit = null)
 	{
 		Id = id;
 		ReceiptItemCode = receiptItemCode;
@@ -55,13 +64,17 @@ public class ReceiptItem
 		TotalAmount = totalAmount;
 		Category = category;
 		Subcategory = subcategory;
+		UnitOfMeasure = UnitCatalog.Normalize(unitOfMeasure);
+		PackageContentQuantity = packageContentQuantity;
+		PackageContentUnit = UnitCatalog.Normalize(packageContentUnit);
 		ValidateForWrite();
 	}
 
 	// Only persistence hydration may retain facts that predate current admission rules.
 	// Infrastructure's write mapper validates the model again before creating an entity.
 	internal static ReceiptItem FromStoredState(Guid id, string? receiptItemCode, string description,
-		decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory)
+		decimal quantity, Money unitPrice, Money totalAmount, string category, string? subcategory,
+		string? unitOfMeasure = null, decimal? packageContentQuantity = null, string? packageContentUnit = null)
 		=> new()
 		{
 			Id = id,
@@ -71,7 +84,10 @@ public class ReceiptItem
 			UnitPrice = unitPrice,
 			TotalAmount = totalAmount,
 			Category = category,
-			Subcategory = subcategory
+			Subcategory = subcategory,
+			UnitOfMeasure = unitOfMeasure,
+			PackageContentQuantity = packageContentQuantity,
+			PackageContentUnit = packageContentUnit
 		};
 
 	private ReceiptItem()
@@ -83,10 +99,10 @@ public class ReceiptItem
 	}
 
 	internal void ValidateForWrite()
-		=> ValidateForWrite(Description, Quantity, UnitPrice, TotalAmount, Category);
+		=> ValidateForWrite(Description, Quantity, UnitPrice, TotalAmount, Category, UnitOfMeasure, PackageContentQuantity, PackageContentUnit);
 
 	private static void ValidateForWrite(string description, decimal quantity, Money unitPrice,
-		Money totalAmount, string category)
+		Money totalAmount, string category, string? unitOfMeasure = null, decimal? packageContentQuantity = null, string? packageContentUnit = null)
 	{
 		if (string.IsNullOrWhiteSpace(description))
 		{
@@ -112,6 +128,28 @@ public class ReceiptItem
 		if (category is null)
 		{
 			throw new ArgumentException(CategoryCannotBeEmpty, nameof(category));
+		}
+		if (unitOfMeasure is not null && !UnitCatalog.IsKnown(unitOfMeasure))
+		{
+			throw new ArgumentException(UnitOfMeasureNotInCatalog, nameof(unitOfMeasure));
+		}
+		bool hasContent = packageContentQuantity is not null || packageContentUnit is not null;
+		if (hasContent)
+		{
+			if (packageContentQuantity is null || packageContentQuantity <= 0)
+			{
+				throw new ArgumentException(PackageContentQuantityMustBePositive, nameof(packageContentQuantity));
+			}
+			if (packageContentUnit is null || !UnitCatalog.IsKnown(packageContentUnit)
+				|| !UnitCatalog.TryGetDimension(packageContentUnit, out var contentDimension)
+				|| (contentDimension != UnitCatalog.Dimension.Count && contentDimension != UnitCatalog.Dimension.Mass && contentDimension != UnitCatalog.Dimension.Volume))
+			{
+				throw new ArgumentException(PackageContentUnitNotInCatalog, nameof(packageContentUnit));
+			}
+			if (unitOfMeasure is not null && unitOfMeasure != UnitCatalog.Each && unitOfMeasure != "count")
+			{
+				throw new ArgumentException(PackageUnitMustCountPackages, nameof(unitOfMeasure));
+			}
 		}
 	}
 }

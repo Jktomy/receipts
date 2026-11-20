@@ -21,7 +21,7 @@ public partial class ReceiptMapper
 			source.Date,
 			new Money((decimal)source.TaxAmount, Currency.USD)
 		)
-		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId };
+		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId, SourcePaperlessDocumentId = source.SourcePaperlessDocumentId };
 	}
 
 	public Receipt ToDomain(UpdateReceiptRequest source)

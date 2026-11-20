@@ -122,25 +122,76 @@ Nearby ambiguous dates/merchants, refunds, mixed-account splits and repeated
 source documents remain REVIEW; nothing is automatically linked as authoritative.
 
 Current implementation: returns a PROPOSED_MATCH / REVIEW / UNMATCHED **suggestion**.
-It does not write to Firefly. Persisting a Firefly ID in the native Receipts
-schema and surfacing a "View matched transaction" link inside its GUI are
-follow-up source changes requiring migrations, tests and review.
+It does not write to Firefly. A reviewer can then POST the suggested transaction ID
+to confirm-match; the bridge verifies it still equals the current unique suggestion
+and stores a durable bridge-side association (confirmedFireflyTransactionId) with
+the draft — no Firefly write, no Receipts schema migration. Surfacing a
+"View matched transaction" link inside the native Receipts GUI remains a
+follow-up source change requiring review.
 
 ## Operator endpoints (private, authenticated)
 
 - GET /healthz — no sensitive data, reports whether review mode is enabled
 - POST /hooks/paperless — webhook token; asynchronous queue acceptance
-- GET /drafts/{paperlessId} — operator token; inspect draft and status
+- GET /drafts/{paperlessId} — operator token; inspect draft, status, draftRevision
+  and any confirmed Firefly association
 - PUT /drafts/{paperlessId} — operator token; correct a pending draft (the same
-  OCR evidence checks still run before save)
-- POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create
+  OCR evidence checks still run before save). Requires { "expectedRevision" }
+  naming the revision edited (compare-and-swap): a stale save is rejected with
+  409 instead of silently overwriting another reviewer's corrections. Returns
+  the new draftRevision and marks the draft reviewer-edited; a later OCR change
+  then preserves these corrections instead of silently replacing them. A save
+  clears any prior payment confirmation (confirmationInvalidated) because the
+  confirmed link described the pre-edit draft.
+- POST /drafts/{paperlessId}/import — operator token; reviewed Receipts create.
+  Requires { "expectedRevision" }: the approver names the exact draft revision
+  reviewed, and a stale approval is rejected with 409 instead of importing a
+  newer draft. There is no silent legacy path: an approval without a named
+  revision is rejected with 400. Concurrent approvals are serialized; the
+  second sees the recorded receiptId (idempotent replay), never a duplicate
+  purchase. Saving corrections (PUT) clears any prior payment confirmation and
+  reports confirmationInvalidated, and a post-review OCR change driving the
+  draft to SOURCE_CHANGED_REVIEW clears it as well — including after an import
+  has already recorded the receipt (the imported record stands, but the bridge
+  no longer presents the old source as confirmed): the link was checked
+  against the old draft or source, so the reviewer must re-check before
+  approval. An import attempted after the OCR changed is rejected
+  with 409 until the draft is corrected and saved again.
 - POST /drafts/{paperlessId}/match — operator token; provide a reviewed
-  fireflySourceAccountId, return read-only Firefly candidate IDs
+  fireflySourceAccountId, return read-only Firefly candidate IDs.
+  A source change detected here blocks the match and voids any stored
+  confirmation, same as the import path.
+- POST /drafts/{paperlessId}/confirm-match — operator token; provide the
+  suggested fireflyTransactionId plus fireflySourceAccountId. Stored only when
+  it still equals the current unique PROPOSED_MATCH; rejected with 409
+  otherwise. A payment already confirmed on a different receipt is rejected
+  with 409 (global one-to-one: checked across all drafts, atomically, so two
+  receipts can never claim the same payment); replaying the same receipt's own
+  confirmation stays idempotent 200. The draft revision and source hash are
+  snapshotted before the Firefly check and re-verified after it responds: a
+  reviewer save or OCR change landing mid-flight returns 409 instead of
+  confirming a stale draft (no write occurs between re-read and store, so the
+  final step is atomic). Never writes to Firefly.
+  The confirmed association lives in bridge-side state (durable JSON) and is
+  carried into Receipts alongside the new sourcePaperlessDocumentId as soon as
+  the import runs — it is not yet a native Receipts field. Native migration
+  would require a schema change plus backfill review and is explicitly out of
+  this scope; treat bridge-side links as the interim record, verified by the
+  synthetic confirm-match tests, not as a ledger entry.
+
+Malformed JSON request bodies fail with 400 (not a generic 422); oversized
+bodies fail with 413; semantic validation failures keep 422 with a named
+problem. No tokens, OCR text, model output or payment data appear in errors.
 
 Paperless webhook uses X-Atlas-Hook-Key. Operator endpoints use
 X-Atlas-Operator-Key. These are separate high-entropy secrets.
-Do not expose the operator API on public ingress. The draft API is currently
-an operator integration point, **not yet a page inside the Receipts React UI**.
+Do not expose the operator API on public ingress. The draft API is also exposed through a **native Admin-only Receipts
+Paperless Inbox** at /admin/paperless-inbox on the current review branch.
+The React page uses the normal Receipts bearer-token session and a same-origin
+server-side proxy. Only the Receipts .NET API holds the operator secret file;
+the browser never receives it. Its review queue is bounded to 100 recent
+Paperless IDs. Optional Paperless source links use a separately configured
+HTTPS browser URL. This GUI is source-applied, NOT production deployed.
 
 ## Build and tests
 
@@ -176,14 +227,35 @@ separately built, tested and pinned fork image is deployed.
 - **VERIFIED (synthetic):** source tag filters, OCR evidence, exact receipt
   totals, weighed products, webhook auth, reviewed create, opt-in create,
   duplicate request protection, source revision mismatch and Firefly GET-only
-  candidate evaluation.
-- **NOT VERIFIED:** real Paperless webhook delivery to this new bridge,
-  live Open Lyric extraction accuracy, production container build, live
-  Receipts persistence and database restores, Firefly credential coverage,
-  native Receipts review UI and persistent Firefly source links.
+  candidate evaluation. Plus: malformed JSON fails 400 (not generic 422),
+  reviewer draft revisions reject stale approvals, concurrent approvals cannot
+  duplicate, OCR changes preserve reviewer corrections until re-review, and
+  confirm-match stores a durable bridge-side payment association with zero
+  Firefly writes. Plus: OCR/model unit spellings normalize to the canonical
+  catalog (each/count/mass/volume), unknown units block import for review, and
+  the import payload carries unitOfMeasure plus sourcePaperlessDocumentId.
+- **NOT VERIFIED:** real Paperless webhook delivery to this bridge,
+  live Open Lyric extraction accuracy, live Receipts database persistence and
+  restores, production credentials, native GUI end-to-end behavior, and
+  persistent Firefly source links. The separate Atlas Docker bridge smoke test
+  and full .NET/React suite must pass on the exact review branch before merge.
 - **No protected data** was read or stored during the implementation/testing.
 - Native Paperless and Midas workflows, current Receipt Wrangler and the
   production Receipts deployment remain unchanged.
+
+### Bridge state backup and restore (isolated test stacks only)
+
+The bridge keeps one JSON file per Paperless document in its data directory
+(ATLAS_BRIDGE_DATA_DIR, default ./atlas-receipts-data). To back up: stop only
+the bridge container/service, copy the whole data directory to versioned
+storage, record its file list with SHA-256 hashes. To restore: first re-verify
+every hash against the manifest and refuse the restore on any mismatch (a
+tampered archive must never reach pg_restore or the data directory); only then
+stop the bridge, replace the data directory with the verified copy, re-check
+hashes, restart, then GET /drafts and one known /drafts/{id} and compare
+status/draftRevision/receiptId/confirmedFireflyTransactionId against the
+recorded values. Never copy production PostgreSQL, Paperless originals or
+secret files as part of this procedure; secrets live only in mounted files.
 
 ### Rollback
 

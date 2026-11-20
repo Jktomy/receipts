@@ -5258,6 +5258,15 @@ export interface components {
             unitPrice: number;
             /** @description Stored currency code without conversion. */
             unitPriceCurrency: string;
+            /** @description Canonical unit for quantity, or null for a plain countable item. */
+            unitOfMeasure?: string | null;
+            /**
+             * Format: double
+             * @description Measurable amount inside each package (e.g. 64 for a 64 fl oz carton). When set, quantity counts packages. Null means quantity is the measured amount.
+             */
+            packageContentQuantity?: number | null;
+            /** @description Canonical mass/volume unit for the package content (g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). Null when there is no package content. */
+            packageContentUnit?: string | null;
             /** Format: double */
             totalAmount: number;
             /** @description Stored currency code without conversion. */
@@ -6342,6 +6351,11 @@ export interface components {
             date: string;
             /** Format: double */
             taxAmount: number;
+            /**
+             * Format: int64
+             * @description Optional Paperless-ngx document ID this receipt was imported from. Stored for drill-down to the original document; never a financial reference.
+             */
+            sourcePaperlessDocumentId?: number | null;
         };
         UpdateReceiptRequest: {
             /**
@@ -6374,6 +6388,11 @@ export interface components {
             date: string;
             /** Format: double */
             taxAmount: number;
+            /**
+             * Format: int64
+             * @description Paperless-ngx document ID this receipt was imported from, if any.
+             */
+            sourcePaperlessDocumentId?: number | null;
         };
         ReceiptListResponse: {
             data: components["schemas"]["ReceiptListItemResponse"][];
@@ -6563,6 +6582,15 @@ export interface components {
              * @description Optional provenance hint. A legacy template link does not verify the purchase; explicit source-bound selection or an approved scoped mapping is required.
              */
             itemTemplateId?: string | null;
+            /** @description Optional canonical unit for quantity (each, count, g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). */
+            unitOfMeasure?: string | null;
+            /**
+             * Format: double
+             * @description Optional measurable amount inside each package. When set, quantity counts packages and the unit must count packages (each/count).
+             */
+            packageContentQuantity?: number | null;
+            /** @description Optional canonical mass/volume for the package content. Null means a plain countable item. Enables comparable per-unit pricing across package sizes; variants are never merged on unit alone. */
+            packageContentUnit?: string | null;
         };
         UpdateReceiptItemRequest: {
             /**
@@ -6589,6 +6617,15 @@ export interface components {
             unitPrice: number;
             /** @description Retired legacy label. Accepted for older clients and ignored; an edit never changes the stored label. */
             category?: string | null;
+            /** @description Optional canonical unit for quantity (each, count, g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). */
+            unitOfMeasure?: string | null;
+            /**
+             * Format: double
+             * @description Optional measurable amount inside each package. When set, quantity counts packages and the unit must count packages (each/count).
+             */
+            packageContentQuantity?: number | null;
+            /** @description Optional canonical mass/volume for the package content. Null keeps the stored unit. */
+            packageContentUnit?: string | null;
             /** @description Retired legacy label. Accepted for older clients and ignored. */
             subcategory?: string | null;
         };
@@ -6631,6 +6668,15 @@ export interface components {
             quantity: number;
             /** Format: double */
             unitPrice: number;
+            /** @description Canonical unit for quantity, or null for a plain countable item. */
+            unitOfMeasure?: string | null;
+            /**
+             * Format: double
+             * @description Measurable amount inside each package (e.g. 64 for a 64 fl oz carton). When set, quantity counts packages. Null means quantity is the measured amount.
+             */
+            packageContentQuantity?: number | null;
+            /** @description Canonical mass/volume unit for the package content (g, kg, oz, lb, ml, l, fl_oz, cup, pt, qt, gal). Null when there is no package content. */
+            packageContentUnit?: string | null;
             /** @description Legacy label kept only so an edit can send it back unchanged. Display currentClassification instead. */
             category: string;
             /** @description Legacy label kept only so an edit can send it back unchanged. Display currentClassification instead. */

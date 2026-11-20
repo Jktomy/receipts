@@ -1485,6 +1485,9 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("text");
 
+                    b.Property<long?>("SourcePaperlessDocumentId")
+                        .HasColumnType("bigint");
+
                     b.Property<decimal>("TaxAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -1500,6 +1503,10 @@ namespace Infrastructure.Migrations
                     b.HasIndex("OccasionId");
 
                     b.HasIndex("PaidFromEnvelopeId");
+
+                    b.HasIndex("SourcePaperlessDocumentId")
+                        .IsUnique()
+                        .HasFilter("\"SourcePaperlessDocumentId\" IS NOT NULL");
 
                     b.ToTable("Receipts", "receipts");
                 });
@@ -1617,6 +1624,17 @@ namespace Infrastructure.Migrations
 
                     b.Property<string>("TotalAmountCurrency")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UnitOfMeasure")
+                        .HasMaxLength(16)
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("PackageContentQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("PackageContentUnit")
+                        .HasMaxLength(16)
                         .HasColumnType("text");
 
                     b.Property<decimal>("UnitPrice")

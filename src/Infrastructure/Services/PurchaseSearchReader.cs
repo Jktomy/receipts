@@ -124,6 +124,9 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 		NormalizedDescription = x.Canonical == null || x.Item.NormalizationReviewState == NormalizationReviewState.Excluded || (!options.IncludeUnreviewed && x.Item.NormalizationReviewState != NormalizationReviewState.Verified) ? null
 			: string.IsNullOrEmpty(x.Canonical.DisplayLabel) ? x.Canonical.CanonicalName : x.Canonical.DisplayLabel,
 		x.Item.Quantity,
+		x.Item.UnitOfMeasure,
+		x.Item.PackageContentQuantity,
+		x.Item.PackageContentUnit,
 		x.Item.UnitPrice,
 		x.Item.UnitPriceCurrency,
 		x.Item.TotalAmount,
@@ -154,10 +157,11 @@ public class PurchaseSearchReader(IDbContextFactory<ApplicationDbContext> contex
 			CategoryReportBucket bucket = Resolve(x.AssignmentCategoryId, x.AssignmentRevisionId,
 							x.HasAssignment, x.IsUnresolvedLegacy, x.BeforeMigrationHistory);
 			return new PurchaseSearchItem(
-		x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
-		x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity,
-		x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
-							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview")
+			x.Id, x.ReceiptId, x.Date, x.Location, x.Description, x.ReceiptItemCode,
+			x.NormalizedDescriptionId, x.NormalizedDescription, x.Quantity,
+			x.UnitPrice, x.UnitPriceCurrency.ToString(), x.TotalAmount, x.TotalAmountCurrency.ToString(),
+							x.NormalizationReviewState == NormalizationReviewState.Verified ? "verified" : x.NormalizationReviewState == NormalizationReviewState.Excluded ? "excluded" : "needsReview",
+							x.UnitOfMeasure, x.PackageContentQuantity, x.PackageContentUnit)
 			{
 				CategoryId = bucket.CategoryId,
 				PathRevisionId = bucket.PathRevisionId,

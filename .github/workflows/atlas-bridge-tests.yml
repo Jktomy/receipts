@@ -17,6 +17,53 @@ permissions:
   contents: read
 
 jobs:
+  atlas-container:
+    name: Build and smoke-test isolated Atlas bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bridge image (no push)
+        run: docker build -f tools/atlas/Dockerfile -t atlas-receipts-bridge:test .
+      - name: Smoke test private container with synthetic secrets only
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d)"
+          trap 'docker rm -f atlas-test-bridge >/dev/null 2>&1 || true; rm -rf "$secret_dir"' EXIT
+          for name in paperless open-lyric receipts webhook operator firefly; do
+            printf 'synthetic-ci-secret-not-real-1234567890' > "$secret_dir/$name"
+          done
+          # The image runs as uid 1000; root-owned mktemp directories default to 0700.
+          # These credentials are fake test strings, never actual personal secrets.
+          chmod 755 "$secret_dir"
+          chmod 444 "$secret_dir/"*
+          docker run -d --name atlas-test-bridge \
+            --publish 127.0.0.1:8675:8675 \
+            --mount "type=bind,src=$secret_dir,dst=/run/secrets,readonly" \
+            -e ATLAS_BRIDGE_BIND=0.0.0.0 \
+            -e ATLAS_PAPERLESS_URL=https://paperless.invalid \
+            -e ATLAS_PAPERLESS_INSTANCE=synthetic \
+            -e ATLAS_PAPERLESS_RECEIPT_TAG_ID=99 \
+            -e ATLAS_OPEN_LYRIC_URL=https://oathgate.invalid/v1 \
+            -e ATLAS_OPEN_LYRIC_MODEL=Open_Lyric \
+            -e ATLAS_RECEIPTS_URL=https://receipts.invalid \
+            -e ATLAS_PAPERLESS_TOKEN_FILE=/run/secrets/paperless \
+            -e ATLAS_OPEN_LYRIC_TOKEN_FILE=/run/secrets/open-lyric \
+            -e ATLAS_RECEIPTS_API_KEY_FILE=/run/secrets/receipts \
+            -e ATLAS_WEBHOOK_SECRET_FILE=/run/secrets/webhook \
+            -e ATLAS_OPERATOR_SECRET_FILE=/run/secrets/operator \
+            -e ATLAS_FIREFLY_TOKEN_FILE=/run/secrets/firefly \
+            atlas-receipts-bridge:test
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8675/healthz | grep -q 'REVIEW_ONLY'; then
+              echo 'Synthetic bridge health smoke test passed'
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Synthetic bridge did not become healthy'
+          docker logs atlas-test-bridge 2>&1 | tail -n 20
+          exit 1
   atlas-synthetic:
     name: Offline OCR / Receipts / Firefly contract
     runs-on: ubuntu-latest

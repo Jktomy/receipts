@@ -134,9 +134,13 @@ RUN case ${TARGETARCH} in \
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
 
+# Reuse the commit hash CI already passes for the client build, so the API
+# image carries provenance without changing the publish workflow.
+ARG VITE_COMMIT_HASH=local
 LABEL org.opencontainers.image.title="Receipts" \
       org.opencontainers.image.description="Receipt management API with React SPA" \
-      org.opencontainers.image.source="https://github.com/mggarofalo/Receipts"
+      org.opencontainers.image.source="https://github.com/mggarofalo/Receipts" \
+      org.opencontainers.image.revision="${VITE_COMMIT_HASH}"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl \
