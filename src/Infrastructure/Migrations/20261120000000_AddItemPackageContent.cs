@@ -14,12 +14,14 @@ public partial class AddItemPackageContent : Migration
 		// When set, item quantity counts packages. Null means quantity is the measured amount.
 		migrationBuilder.AddColumn<decimal>(
 			name: "PackageContentQuantity",
+			schema: "receipts",
 			table: "ReceiptItems",
 			type: "numeric(18,4)",
 			nullable: true);
 
 		migrationBuilder.AddColumn<string>(
 			name: "PackageContentUnit",
+			schema: "receipts",
 			table: "ReceiptItems",
 			type: "character varying(16)",
 			maxLength: 16,
@@ -31,10 +33,12 @@ public partial class AddItemPackageContent : Migration
 	{
 		migrationBuilder.DropColumn(
 			name: "PackageContentQuantity",
+			schema: "receipts",
 			table: "ReceiptItems");
 
 		migrationBuilder.DropColumn(
 			name: "PackageContentUnit",
+			schema: "receipts",
 			table: "ReceiptItems");
 	}
 }

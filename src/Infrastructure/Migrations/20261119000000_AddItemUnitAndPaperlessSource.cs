@@ -14,6 +14,7 @@ public partial class AddItemUnitAndPaperlessSource : Migration
 		// Null preserves the historical meaning of a plain countable item.
 		migrationBuilder.AddColumn<string>(
 			name: "UnitOfMeasure",
+			schema: "receipts",
 			table: "ReceiptItems",
 			type: "character varying(16)",
 			maxLength: 16,
@@ -23,6 +24,7 @@ public partial class AddItemUnitAndPaperlessSource : Migration
 		// back to its original document. Null for receipts imported otherwise.
 		migrationBuilder.AddColumn<long>(
 			name: "SourcePaperlessDocumentId",
+			schema: "receipts",
 			table: "Receipts",
 			type: "bigint",
 			nullable: true);
@@ -33,10 +35,12 @@ public partial class AddItemUnitAndPaperlessSource : Migration
 	{
 		migrationBuilder.DropColumn(
 			name: "UnitOfMeasure",
+			schema: "receipts",
 			table: "ReceiptItems");
 
 		migrationBuilder.DropColumn(
 			name: "SourcePaperlessDocumentId",
+			schema: "receipts",
 			table: "Receipts");
 	}
 }

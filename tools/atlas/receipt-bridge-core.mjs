@@ -103,6 +103,10 @@ export function dimensionOfUnit(raw) {
 export function sanitizePurchaseDraft(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid purchase draft");
   const pick = (v, n = 300) => typeof v === "string" ? v.slice(0, n) : "";
+  // Quantities may arrive as JSON numbers; preserve them as text without
+  // inventing a default. A missing quantity stays empty for review.
+  const pickAmount = (v, n = 30) => typeof v === "string" ? v.slice(0, n) :
+    (typeof v === "number" && Number.isFinite(v) ? String(v).slice(0, n) : "");
   return {
     merchant: pick(raw.merchant, 180),
     merchantEvidence: pick(raw.merchantEvidence),
@@ -118,10 +122,10 @@ export function sanitizePurchaseDraft(raw) {
     items: Array.isArray(raw.items) ? raw.items.slice(0, 200).map(item => ({
       description: pick(item?.description, 200), sku: pick(item?.sku, 80),
       evidence: pick(item?.evidence, 300),
-      quantity: pick(item?.quantity ?? "1", 30),
+      quantity: pickAmount(item?.quantity, 30),
       unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30),
       unit: pick(item?.unit, 16),
-      packageContentQuantity: pick(item?.packageContentQuantity, 30),
+      packageContentQuantity: pickAmount(item?.packageContentQuantity, 30),
       packageContentUnit: pick(item?.packageContentUnit, 16)
     })) : [],
     adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
@@ -153,8 +157,15 @@ export function qualifyItemization(raw, ocrText) {
   for (const rawItem of Array.isArray(raw.items) ? raw.items.slice(0, 200) : []) {
     const description = normalizeDescription(rawItem?.description);
     let quantity, unitPrice, extended;
+    // Never invent a purchase count: a missing quantity stays unknown and
+    // fails qualification for human review instead of defaulting to 1.
+    const quantityText = rawItem?.quantity;
+    if (quantityText === undefined || quantityText === null || String(quantityText).trim() === "") {
+      problems.push("Purchase quantity requires review");
+      continue;
+    }
     try {
-      quantity = quantityTenThousandths(rawItem?.quantity ?? "1");
+      quantity = quantityTenThousandths(quantityText);
       unitPrice = unitPriceTenThousandths(rawItem?.unitPrice);
       extended = moneyCents(rawItem?.total, { allowZero: false });
       // Both quantity and unit price have four-decimal precision in Receipts.
@@ -196,8 +207,8 @@ export function qualifyItemization(raw, ocrText) {
         problems.push("Package content unit requires review");
       } else {
         const contentDimension = dimensionOfUnit(packageContentUnit);
-        if (contentDimension !== "mass" && contentDimension !== "volume") {
-          problems.push("Package content must be a mass or volume");
+        if (contentDimension !== "count" && contentDimension !== "mass" && contentDimension !== "volume") {
+          problems.push("Package content unit requires review");
         }
       }
       if (unitOfMeasure !== null && unitOfMeasure !== "each" && unitOfMeasure !== "count") {
@@ -294,8 +305,10 @@ const extractionRules = [
   "Return ONE JSON object, not markdown, with merchant, date (YYYY-MM-DD), total, tax, currency USD,",
   "confidence ('high' only if all figures and line evidence are clear), hasRefunds, mixedTender,",
   "merchantEvidence, dateEvidence, totalEvidence: short verbatim substrings of the supplied OCR.",
-  "items array of {description, sku, quantity, unitPrice, total, unit, evidence}, and adjustments array",
+  "items array of {description, sku, quantity, unitPrice, total, unit, packageContentQuantity, packageContentUnit, evidence}, and adjustments array",
   "of {type, amount, description}. Totals, tax and adjustments must be decimal strings with two decimals; quantity and unitPrice may use four decimals.",
+  "Quantity counts purchased packages (1 for one carton); packageContentQuantity/Unit carry the measurable amount inside each package",
+  "(for example 12 count for a 12-egg carton, or 64 fl_oz for a juice carton). Leave package fields empty when the OCR does not state them.",
   "Each evidence must be copied verbatim from a line in the supplied OCR.",
   "Separate signed discounts and coupons into adjustments (negative amounts); use tip/other for additions.",
   "Never invent products, categories, quantities, card numbers, account IDs, or missing amounts.",

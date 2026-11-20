@@ -33,6 +33,13 @@ public class ReceiptEntityConfiguration : IEntityTypeConfiguration<ReceiptEntity
 		builder.HasIndex(e => e.Date)
 			.HasFilter("\"DeletedAt\" IS NULL");
 
+		// One Paperless source document imports at most once: a filtered unique
+		// index on the optional source ID blocks a second receipt for the same
+		// document even when the second import uses a different request ID.
+		builder.HasIndex(e => e.SourcePaperlessDocumentId)
+			.IsUnique()
+			.HasFilter("\"SourcePaperlessDocumentId\" IS NOT NULL");
+
 		builder.HasOne<Entities.Envelopes.EnvelopeEntity>().WithMany().HasForeignKey(e => e.PaidFromEnvelopeId).OnDelete(DeleteBehavior.Restrict);
 		builder.HasOne<Entities.Envelopes.OccasionEntity>().WithMany().HasForeignKey(e => e.OccasionId).OnDelete(DeleteBehavior.Restrict);
 

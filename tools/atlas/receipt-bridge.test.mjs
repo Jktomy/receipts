@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
-  toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric,
+  toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric, sanitizePurchaseDraft,
   getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits, dimensionOfUnit
 } from "./receipt-bridge-core.mjs";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
@@ -460,6 +460,35 @@ test("package content validates: measurable per package, countable unit", () => 
   assert.ok(qualifyItemization(badUnit, ocr).problems.includes("Package content unit requires review"));
   const half = {...good, items:[{...good.items[0], unit:"each", packageContentQuantity:"64"}]};
   assert.ok(qualifyItemization(half, ocr).problems.includes("Package content unit requires review"));
+});
+test("count-based multipack preserves purchase quantity separately from package contents", () => {
+  // EGGS 12 CT $5.00 in the shared fixture: purchased quantity 1 carton,
+  // contents 12 count, package price $5.00. Quantity and contents
+  // must never be confused.
+  const localOcr = ["H-E-B 11/18/2026", "MILK 1 3.99", "EGGS 1 5.00", "TAX 0.61", "TOTAL 9.60"].join("\n");
+  const multipack = {...good, tax:"0.61", adjustments: [], total:"9.60", totalEvidence:"TOTAL 9.60", items:[{...good.items[0], description:"EGGS 12 CT", evidence:"EGGS 1 5.00", quantity:"1", unitPrice:"5.00", total:"5.00", unit:"each", packageContentQuantity:"12", packageContentUnit:"count"}, {...good.items[1], evidence:"MILK 1 3.99", quantity:"1", unitPrice:"3.99", total:"3.99"}]};
+  const q = qualifyItemization(multipack, localOcr);
+  assert.equal(q.ok, true);
+  assert.equal(q.items[0].quantity, 1);
+  assert.equal(q.items[0].unitPrice, 5.00);
+  assert.equal(q.items[0].unitOfMeasure, "each");
+  assert.equal(q.items[0].packageContentQuantity, 12);
+  assert.equal(q.items[0].packageContentUnit, "count");
+  const payload = toCompleteReceiptRequest(q, "atlas-test", 44);
+  assert.equal(payload.items[0].quantity, 1);
+  assert.equal(payload.items[0].packageContentQuantity, 12);
+  assert.equal(payload.items[0].packageContentUnit, "count");
+});
+test("missing purchase quantity requires review instead of assuming one", () => {
+  const base = {...good.items[0]};
+  delete base.quantity;
+  const missing = {...good, items:[base, good.items[1]]};
+  const q = qualifyItemization(missing, ocr);
+  assert.equal(q.ok, false);
+  assert.ok(q.problems.includes("Purchase quantity requires review"));
+  // The sanitizer must preserve the unknown instead of inventing a count.
+  const sanitized = sanitizePurchaseDraft(missing);
+  assert.equal(sanitized.items[0].quantity, "");
 });
 test("editing a confirmed draft voids the payment confirmation", async () => {
   const pages = [{ data: [fireflyOne], links: { next: null } }];

@@ -1504,6 +1504,10 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("PaidFromEnvelopeId");
 
+                    b.HasIndex("SourcePaperlessDocumentId")
+                        .IsUnique()
+                        .HasFilter("\"SourcePaperlessDocumentId\" IS NOT NULL");
+
                     b.ToTable("Receipts", "receipts");
                 });
 
