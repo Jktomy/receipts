@@ -125,7 +125,7 @@ public class CompleteReceiptWriter(
 			await context.SaveChangesAsync(cancellationToken);
 		}
 		catch (DbUpdateException ex) when (ex.InnerException is PostgresException
-			{ SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: SourceIndexName }
+		{ SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: SourceIndexName }
 			&& receipt.SourcePaperlessDocumentId is long sourceId)
 		{
 			// A replayed Paperless import raced or retried past the request-level
