@@ -358,24 +358,11 @@ export async function getPaperlessText(fetcher, config, rawDocumentId) {
   });
   const d = await jsonResponse(response, "Paperless");
   if (Number(d?.id) !== documentId) throw new Error("Paperless returned unexpected document ID");
-  const tags = Array.isArray(d.tags) ? d.tags.map(Number) : d.tags;
-  if (!Array.isArray(tags) || !tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
-  if (tags.some(tag => (config.blockedTagIds ?? []).map(Number).includes(tag))) throw new Error("Document has an excluded sensitive tag");
+  if (!Array.isArray(d.tags) || !d.tags.includes(config.requiredTagId)) throw new Error("Required receipt-analysis tag absent");
+  if (d.tags.some(tag => (config.blockedTagIds ?? []).includes(tag))) throw new Error("Document has an excluded sensitive tag");
   if (typeof d.content !== "string" || d.content.trim().length < 20) throw new Error("Document OCR content is not ready");
   if (d.content.length > 100000) throw new Error("OCR text exceeds input limit");
-  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex"), tags };
-}
-
-export function classifyRoutes(rawTags, config) {
-  if (!Array.isArray(rawTags)) throw new Error("Paperless document tags are not an array");
-  const tags = rawTags.map(Number);
-  if (!tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
-  const blocked = (config.blockedTagIds ?? []).map(Number);
-  if (tags.some(tag => blocked.includes(tag))) throw new Error("Document has an excluded sensitive tag");
-  const routes = ["tracer"];
-  if (config.grocyTagId != null && tags.includes(Number(config.grocyTagId))) routes.push("grocy");
-  if (config.myGarageTagId != null && tags.includes(Number(config.myGarageTagId))) routes.push("mygarage");
-  return routes;
+  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex") };
 }
 
 const extractionRules = [
@@ -406,14 +393,20 @@ const extractionRules = [
 //  2. Revision stability: identical (contentHash, modified) across bounded
 //     consecutive re-fetches (each re-fetch re-enforces required/blocked tags).
 //  3. Paperless-AI (when paperlessAiUrl is configured): the doc is absent
-//     from active/queued processing AND its latest history entry is done.
+//     from active/queued processing AND its OCR record shows status done,
+//     written back, never reverted AND a history item bound to this document
+//     exists that was never reverted. History items carry no status field;
+//     presence alone never proves completion.
 // Strict ok requires 1 + 2 + 3. Without an AI endpoint the gate can never
 // prove finalization, so it fails closed by design.
 //
-// Paperless-AI native HTTP paths below are the bridge's documented
-// assumption and MUST be confirmed against the installed Paperless-AI
-// version before live activation; a wrong path fails closed (unproven),
-// never open.
+// Paperless-AI response SHAPES below are read-only verified 2026-11-21
+// against the installed native contract (history.getHistory with documentId,
+// ocr.getDocumentsById). The REST path strings mirror the native tool
+// contract (/api/processing/status, /api/ocr/documents/{id},
+// /api/history?documentId=) and MUST be confirmed read-only against the
+// installed version before live activation; a wrong path fails closed
+// (unproven), never open.
 const FINALIZATION_DEFAULTS = { maxAttempts: 6, intervalMsMs: 5000, stableReads: 2 };
 
 function paperlessTaskRefsDoc(t, documentId) {
@@ -454,7 +447,8 @@ async function paperlessTasksSettled(fetcher, config, documentId) {
   }
 }
 
-async function paperlessAiSettled(fetcher, config, documentId) {
+async function paperlessAiSettled(fetcher, config, rawDocumentId) {
+  const documentId = Number(rawDocumentId);
   if (!config.paperlessAiUrl) return { settled: null, reason: "Paperless-AI endpoint not configured" };
   try {
     const base = requireHttpUrl(config.paperlessAiUrl, "Paperless-AI");
@@ -473,20 +467,39 @@ async function paperlessAiSettled(fetcher, config, documentId) {
     if (queued.map(Number).includes(Number(documentId))) {
       return { settled: false, reason: "Paperless-AI has document " + documentId + " queued" };
     }
-    const histUrl = new URL("/api/history?documentId=" + documentId + "&pageSize=1", base.origin);
+    // Installed Paperless-AI native contract (read-only verified 2026-11-21
+    // against history.getHistory + ocr.getDocumentsById): completion is an
+    // OCR record with status done, written back, never reverted, PLUS a
+    // history item bound to this document that was never reverted. There is
+    // no status field on history items; presence alone never proves completion.
+    // REST path strings below mirror the native tool contract; a wrong path
+    // fails closed (unproven), never open. Confirm read-only at activation.
+    const ocrUrl = new URL("/api/ocr/documents/" + documentId, base.origin);
+    const ocrRes = await fetcher(ocrUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
+    const ocrDoc = await jsonResponse(ocrRes, "Paperless-AI");
+    const ocr = ocrDoc?.ocr ?? {};
+    if (String(ocr.status ?? "").toLowerCase() !== "done") {
+      return { settled: false, reason: "Paperless-AI OCR not complete for document " + documentId };
+    }
+    if (ocr.writtenBack !== true) {
+      return { settled: false, reason: "Paperless-AI OCR not written back for document " + documentId };
+    }
+    if (ocr.revertedAt != null) {
+      return { settled: false, reason: "Paperless-AI OCR reverted for document " + documentId };
+    }
+    const histUrl = new URL("/api/history?documentId=" + documentId, base.origin);
     const histRes = await fetcher(histUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
     const hist = await jsonResponse(histRes, "Paperless-AI");
-    const entries = Array.isArray(hist?.entries) ? hist.entries : [];
-    if (entries.length === 0) {
+    const items = Array.isArray(hist?.items) ? hist.items : [];
+    if (items.length === 0) {
       return { settled: false, reason: "Paperless-AI has no completion record for document " + documentId };
     }
     // Never trust the filter: the record itself must be bound to this document.
-    if (Number(entries[0]?.documentId) !== Number(documentId)) {
+    if (Number(items[0]?.documentId) !== documentId) {
       return { settled: false, reason: "Paperless-AI latest record is not bound to document " + documentId };
     }
-    const latest = String(entries[0]?.status ?? "").toLowerCase();
-    if (!["done", "success", "succeeded", "applied"].includes(latest)) {
-      return { settled: false, reason: "Paperless-AI latest record for document " + documentId + " is " + latest };
+    if (items[0]?.revertedAt != null) {
+      return { settled: false, reason: "Paperless-AI latest record for document " + documentId + " was reverted" };
     }
     return { settled: true };
   } catch (error) {
