@@ -230,6 +230,15 @@ verified read-only 2026-11-21 against the installed native contract; confirm the
 three REST path strings in receipt-bridge-core.mjs read-only before activation
 (a wrong path fails closed, never open).
 
+Classification reuses existing live Paperless tags (verified 2026-11-21):
+Tracer=14 is the required receipt tag; Grocy=15 adds the `grocy` route and
+MyGarage=13 adds the `mygarage` route on the qualified draft (`routes`
+refreshes from the approval-time re-fetch). Protected exclusions, enforced in
+the native workflow filter AND the bridge before any model call:
+Medical Records=18, healthlog-apple=4, Endocrinology=17, Optometry=20
+(`ATLAS_PAPERLESS_BLOCKED_TAG_IDS`, staged default `18,4,17,20`). Never create
+another Receipts tag and never repurpose Synthetic test=2.
+
 The base Receipts Compose still defaults to an upstream image. Changes to the
 forked .NET app or docker-entrypoint.sh do not affect that image until a
 separately built, tested and pinned fork image is deployed.
