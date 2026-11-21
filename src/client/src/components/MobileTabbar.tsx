@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router";
 import { Icon } from "@/components/primitives";
+import { APP_NAME } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,7 +15,7 @@ const TABS = [
   // Label matches the sidebar entry so screen-reader / voice-control users
   // hear the same name for the same destination across the two shells
   // (WCAG 3.2.4 consistent identification).
-  { to: "/receipts", label: "Receipts", icon: Icon.Receipt },
+  { to: "/receipts", label: APP_NAME, icon: Icon.Receipt },
   { to: "/receipts/new", label: "New", icon: Icon.Plus },
   { to: "/reports", label: "Reports", icon: Icon.Chart },
 ] as const;

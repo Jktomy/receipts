@@ -5,6 +5,9 @@ WORKDIR /app
 COPY tools/atlas/receipt-match.mjs /app/
 COPY tools/atlas/receipt-bridge-core.mjs /app/
 COPY tools/atlas/receipt-bridge-server.mjs /app/
+COPY tools/atlas/specialist-mygarage.mjs /app/
+COPY tools/atlas/specialist-grocy.mjs /app/
+COPY tools/atlas/specialist-dispatch.mjs /app/
 RUN mkdir -p /data && chown node:node /data
 USER node
 ENV ATLAS_BRIDGE_BIND=0.0.0.0 \
