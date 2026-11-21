@@ -179,3 +179,19 @@ test("verifyFinalOcr requires AI evidence even when text is stable", async () =>
   assert.equal(r.ok, false);
   assert.match(r.reason, /final OCR/i);
 });
+
+test("string document ID still sees AI processing (type-safe doc match)", async () => {
+  const h = harness({ ai: "processing" });
+  const src = { id: "9501", modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
+  const r = await verifyFinalOcr(h.fetcher, h.config, src, { sleep: async () => {} });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /processing/);
+  assert.equal(h.stats().modelCalls, 0);
+});
+
+test("verifyFinalOcr rejects unusable numerics fail-fast instead of crashing", async () => {
+  const h = harness({ ai: "done" });
+  const src = { id: 9501, modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
+  await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationMaxAttempts: 0 }, src, { sleep: async () => {} }), /finalizationMaxAttempts/);
+  await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationStableReads: 1 }, src, { sleep: async () => {} }), /finalizationStableReads/);
+});
