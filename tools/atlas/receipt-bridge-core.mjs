@@ -480,6 +480,16 @@ async function paperlessAiSettled(fetcher, config, rawDocumentId) {
     if (queued.map(Number).includes(documentId)) {
       return { settled: false, reason: "Paperless-AI has document " + documentId + " queued" };
     }
+    // Installed native status contract (read-only verified 2026-11-21 via
+    // processing.getStatus): the queue is a COUNT (queued: number), never
+    // document IDs. A non-empty unattributed queue cannot prove this document
+    // is not awaiting (re)processing — a previous completion record could
+    // predate the queued run — so it fails closed. The queuedDocumentIds
+    // array above is retained as an opportunistic REST shape; absence of IDs
+    // never implies an empty queue.
+    if (typeof st?.queued === "number" && st.queued > 0) {
+      return { settled: false, reason: "Paperless-AI queue non-empty (" + st.queued + "), document attribution unavailable" };
+    }
     // Installed Paperless-AI native contract (read-only verified 2026-11-21
     // against history.getHistory + ocr.getDocumentsById): completion is an
     // OCR record with status done, written back, never reverted, PLUS a
