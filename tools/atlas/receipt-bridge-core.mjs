@@ -562,8 +562,8 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
   if (!acceptedDate(start) || !acceptedDate(end) || end < start) throw new Error("Invalid Firefly date range");
   let url = apiUrl(config.fireflyUrl, "/api/v1/transactions?start=" + start + "&end=" + end + "&type=withdrawal&limit=100");
   const origin = url.origin;
-  let count = 0;
   const transactions = [], seenPages = new Set();
+  let count = 0;
   while (url) {
     if (++count > 100 || seenPages.has(url.href)) throw new Error("Firefly pagination exceeded safe bounds");
     seenPages.add(url.href);
@@ -574,8 +574,6 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
     });
     const page = await jsonResponse(response, "Firefly");
     if (!Array.isArray(page?.data)) throw new Error("Malformed Firefly response");
-    if (transactions.length > 10000) throw new Error("Firefly query too large");
-    const transactions = [], seenPages = new Set();
     transactions.push(...page.data);
     if (transactions.length > 10000) throw new Error("Firefly query too large");
     const next = page?.links?.next;
