@@ -37,7 +37,7 @@ for (const width of [375, 1280]) {
       await expect(
         page
           .getByRole("dialog")
-          .getByRole("link", { name: "Receipts", exact: true }),
+          .getByRole("link", { name: "Tracer", exact: true }),
       ).toBeVisible();
       await expect(page.locator('a[href="/item-templates"]')).toHaveCount(0);
       await page.screenshot({
