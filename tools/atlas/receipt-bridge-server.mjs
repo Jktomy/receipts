@@ -229,7 +229,22 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       });
       if (!decision.ok) return { status: 422, result: { error: "Itemization requires correction", problems: decision.problems } };
       const result = await importQualifiedReceipt(fetcher, config, qualified, id, decision.attestation);
-      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId });
+      // Routes refresh from the approval-time re-fetch: a retag between review
+      // and approval is honored, and a revoked tag already threw above.
+      const routes = classifyRoutes(current.tags, config);
+      // Specialist dispatch is staged and OFF by default. It runs only after
+      // the human-approved import, binds to the approved revision, records
+      // its outcome separately, and never alters IMPORTED or Firefly state.
+      let specialist = null;
+      if (config.specialistDispatch?.enabled === true) {
+        try {
+          const { dispatchSpecialists } = await import("./specialist-dispatch.mjs");
+          specialist = await dispatchSpecialists(fetcher, config.specialistDispatch, { routes }, qualified, { paperlessId: id, contentHash: saved.contentHash }, { ...(approval ?? {}), ...(specialistSelection ?? {}) });
+        } catch (error) {
+          specialist = { dispatched: false, error: error?.message ?? String(error) };
+        }
+      }
+      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId, routes, specialist });
       return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
     } finally {
       active.delete(id);
