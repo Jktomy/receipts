@@ -50,12 +50,31 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
         return new Response(JSON.stringify(
           { running: true, current: state === "processing" ? [{ documentId: 9501 }] : [], queuedDocumentIds: [] }), { status: 200 });
       }
-      if (url.pathname === "/api/history") {
-        if (state === "wrongdoc") {
-          return new Response(JSON.stringify({ entries: [{ documentId: 9999, status: "done" }] }), { status: 200 });
+      if (url.pathname === "/api/ocr/documents/9501") {
+        if (state === "ocr-pending") {
+          return new Response(JSON.stringify(
+            { id: 9501, ocr: { status: "running", writtenBack: false, revertedAt: null } }), { status: 200 });
+        }
+        if (state === "not-written") {
+          return new Response(JSON.stringify(
+            { id: 9501, ocr: { status: "done", writtenBack: false, revertedAt: null } }), { status: 200 });
+        }
+        if (state === "reverted") {
+          return new Response(JSON.stringify(
+            { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: "2026-11-21T00:00:00Z" } }), { status: 200 });
         }
         return new Response(JSON.stringify(
-          { entries: state === "done" ? [{ documentId: 9501, status: "done" }] : [] }), { status: 200 });
+          { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: null } }), { status: 200 });
+      }
+      if (url.pathname === "/api/history") {
+        if (state === "wrongdoc") {
+          return new Response(JSON.stringify({ items: [{ documentId: 9999, revertedAt: null }] }), { status: 200 });
+        }
+        if (state === "reverted") {
+          return new Response(JSON.stringify({ items: [{ documentId: 9501, revertedAt: "2026-11-21T00:00:00Z" }] }), { status: 200 });
+        }
+        return new Response(JSON.stringify(
+          { items: (state === "done" || state === "processing") ? [{ documentId: 9501, revertedAt: null }] : [] }), { status: 200 });
       }
     }
     throw new Error("UNEXPECTED " + target);
@@ -194,4 +213,36 @@ test("verifyFinalOcr rejects unusable numerics fail-fast instead of crashing", a
   const src = { id: 9501, modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
   await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationMaxAttempts: 0 }, src, { sleep: async () => {} }), /finalizationMaxAttempts/);
   await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationStableReads: 1 }, src, { sleep: async () => {} }), /finalizationStableReads/);
+});
+
+test("OCR still running fails closed with zero model calls", async () => {
+  const h = harness({ ai: "ocr-pending" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason, /OCR|final OCR/i);
+  assert.equal(h.stats().modelCalls, 0);
+});
+
+test("missing Paperless-AI history fails closed", async () => {
+  const h = harness({ ai: "no-history" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason, /final OCR|history/i);
+  assert.equal(h.stats().modelCalls, 0);
+});
+
+test("reverted AI record fails closed", async () => {
+  const h = harness({ ai: "reverted" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason, /revert|final OCR/i);
+  assert.equal(h.stats().modelCalls, 0);
+});
+
+test("OCR done but not written back fails closed", async () => {
+  const h = harness({ ai: "not-written" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason, /write|final OCR/i);
+  assert.equal(h.stats().modelCalls, 0);
 });
