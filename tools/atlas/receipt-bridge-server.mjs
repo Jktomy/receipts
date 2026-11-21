@@ -7,7 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
   importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport,
-  verifyFinalOcr
+  verifyFinalOcr, classifyRoutes
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -162,10 +162,13 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       // through OCR changes, so the pre-gate fetch is superseded here.
       source = gated.proven ?? source;
       const qualified = qualifyItemization(parsed, source.content);
+      // Routes come from the PROVEN revision's tags, re-checked on every
+      // re-fetch; a blocked tag throws here before any model call or draft.
+      const routes = classifyRoutes(source.tags, config);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
-        problems: qualified.problems,
+        problems: qualified.problems, routes,
         draftRevision: (previous?.draftRevision ?? 0) + 1,
         reviewerEdited: false,
         finalization: { mode: config.finalizationMode ?? "off", ok: true, evidence: gated.evidence },
@@ -193,7 +196,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     }
   }
 
-  async function importReviewed(id, expectedRevision, approval = null) {
+  async function importReviewed(id, expectedRevision, approval = null, specialistSelection = null) {
     // Serialize concurrent approvals: the first import wins, the second sees the
     // recorded receiptId (idempotent replay) instead of posting a duplicate.
     if (active.has(id)) return { status: 409, result: { error: "Processing still active: retry shortly" } };
@@ -335,6 +338,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           return state && {
             paperlessId: id, status: state.status, modified: state.modified,
             problems: state.problems ?? [], receiptId: state.receiptId ?? null,
+            routes: state.routes ?? [], specialist: state.specialist ?? null,
             draftRevision: state.draftRevision ?? null,
             confirmedFireflyTransactionId: state.confirmedFireflyTransactionId ?? null,
             merchant: state.draft?.merchant ?? null,
@@ -393,7 +397,11 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         const approval = review && typeof review === "object"
           ? { reviewer, approvedAt: review.approvedAt, ocrSha256: review.ocrSha256, draftRevision: review.draftRevision }
           : null;
-        const result = await importReviewed(id, importBody.expectedRevision, approval);
+        const specialistSelection = {
+          selectedVehicleVin: typeof importBody?.selectedVehicleVin === "string" ? importBody.selectedVehicleVin : null,
+          serviceCategory: typeof importBody?.serviceCategory === "string" ? importBody.serviceCategory : null
+        };
+        const result = await importReviewed(id, importBody.expectedRevision, approval, specialistSelection);
         return safeJson(response, result.status, result.result);
       }
       if (request.method === "POST" && match[2] === "match") {
@@ -432,6 +440,8 @@ if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.arg
     paperlessUrl: process.env.ATLAS_PAPERLESS_URL,
     paperlessInstance: process.env.ATLAS_PAPERLESS_INSTANCE,
     requiredTagId: Number(process.env.ATLAS_PAPERLESS_RECEIPT_TAG_ID),
+    grocyTagId: process.env.ATLAS_PAPERLESS_GROCY_TAG_ID ? Number(process.env.ATLAS_PAPERLESS_GROCY_TAG_ID) : null,
+    myGarageTagId: process.env.ATLAS_PAPERLESS_MYGARAGE_TAG_ID ? Number(process.env.ATLAS_PAPERLESS_MYGARAGE_TAG_ID) : null,
     blockedTagIds: String(process.env.ATLAS_PAPERLESS_BLOCKED_TAG_IDS ?? "").split(",").filter(Boolean).map(Number),
     paperlessToken: secret("ATLAS_PAPERLESS_TOKEN"),
     openLyricUrl: process.env.ATLAS_OPEN_LYRIC_URL,
