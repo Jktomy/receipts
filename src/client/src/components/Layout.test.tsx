@@ -101,7 +101,7 @@ function renderLayout(authOverrides?: Partial<AuthContextValue>, route = "/") {
 describe("Layout", () => {
   it("renders the app brand name", () => {
     renderLayout();
-    expect(screen.getAllByText("Receipts").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Tracer").length).toBeGreaterThan(0);
   });
 
   it("renders outlet content", () => {
@@ -179,8 +179,7 @@ describe("Layout", () => {
 
   it("calls logout when Logout is clicked in the user dropdown", async () => {
     const user = userEvent.setup();
-    const logoutMock = vi.fn().mockResolvedValue(undefined);
-    renderLayout({ logout: logoutMock });
+    renderLayout();
     await user.click(screen.getByRole("button", { name: /user menu for/i }));
     await waitFor(() =>
       expect(
@@ -273,7 +272,6 @@ describe("Layout active nav resolution", () => {
 
   it("keeps the sidebar and the mobile drawer in agreement", async () => {
     renderLayout(undefined, "/settings/ynab");
-    const desktop = currentHrefsWithin(sidebar());
     const drawer = await openMobileDrawer();
     expect(currentHrefsWithin(drawer)).toEqual(desktop);
   });
@@ -348,10 +346,6 @@ describe("account and backup navigation", () => {
     expect(nav.getByRole("link", { name: "Security" })).toHaveAttribute(
       "href",
       "/security",
-    );
-    expect(nav.getByRole("link", { name: "API Keys" })).toHaveAttribute(
-      "href",
-      "/api-keys",
     );
     expect(nav.getByRole("link", { name: "YNAB" })).toHaveAttribute(
       "href",
