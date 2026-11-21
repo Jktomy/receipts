@@ -412,6 +412,10 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         const approval = review && typeof review === "object"
           ? { reviewer, approvedAt: review.approvedAt, ocrSha256: review.ocrSha256, draftRevision: review.draftRevision }
           : null;
+        // Operator-selected specialist routing rides alongside the approval
+        // (never inside the attestation): the reviewer picks the vehicle and
+        // service category in the approval dialog. Absent selections hold
+        // dispatch; nothing is ever invented.
         const specialistSelection = {
           selectedVehicleVin: typeof importBody?.selectedVehicleVin === "string" ? importBody.selectedVehicleVin : null,
           serviceCategory: typeof importBody?.serviceCategory === "string" ? importBody.serviceCategory : null
