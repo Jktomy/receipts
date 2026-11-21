@@ -38,6 +38,14 @@ services:
       - ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING=${ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING:-0}
       # Separate approval gate: keep false until reviewed synthetic acceptance.
       - ATLAS_AUTO_IMPORT_ENABLED=${ATLAS_AUTO_IMPORT_ENABLED:-0}
+      # Final-OCR proof gate: keep off until the Paperless-AI endpoint and tag
+      # taxonomy are qualified and separately approved. Strict mode requires
+      # ATLAS_PAPERLESS_AI_URL plus its token file (provisioned at activation).
+      - ATLAS_FINALIZATION_MODE=${ATLAS_FINALIZATION_MODE:-off}
+      - ATLAS_PAPERLESS_AI_URL=${ATLAS_PAPERLESS_AI_URL:-}
+      - ATLAS_FINALIZATION_MAX_ATTEMPTS=${ATLAS_FINALIZATION_MAX_ATTEMPTS:-6}
+      - ATLAS_FINALIZATION_INTERVAL_MS=${ATLAS_FINALIZATION_INTERVAL_MS:-5000}
+      - ATLAS_FINALIZATION_STABLE_READS=${ATLAS_FINALIZATION_STABLE_READS:-2}
       - ATLAS_PAPERLESS_TOKEN_FILE=/run/secrets/atlas-paperless-token
       - ATLAS_OPEN_LYRIC_TOKEN_FILE=/run/secrets/atlas-open-lyric-token
       - ATLAS_RECEIPTS_API_KEY_FILE=/run/secrets/atlas-receipts-api-key

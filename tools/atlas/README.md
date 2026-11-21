@@ -197,7 +197,7 @@ HTTPS browser URL. This GUI is source-applied, NOT production deployed.
 
 Run on Node 22+ without additional dependencies:
 
-    node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs
+    node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs tools/atlas/receipt-finalization.test.mjs
 
 A separately tested Docker image can be built from the fork's repository root
 using tools/atlas/Dockerfile. An **opt-in** Compose override is provided at
@@ -218,6 +218,16 @@ Oathgate's configured route is authorized and appropriate for that document.
 Set ATLAS_AUTO_IMPORT_ENABLED=1 only after validated source-specific acceptance.
 Both default OFF. Keep medical and other protected tags excluded.
 
+ATLAS_FINALIZATION_MODE=strict additionally requires doc-ID-bound proof that
+final improved OCR completed (settled Paperless tasks, stable revision across
+bounded re-fetches, and a Paperless-AI done record for that document) before
+any model call. Anything unproven fails closed to manual review with zero model
+calls. An Updated event alone is never proof. Keep the default OFF until the
+Paperless-AI endpoint, its token, the dedicated Receipts tag, and the
+protected-exclusion list are qualified and separately approved; confirm the two
+Paperless-AI native paths in receipt-bridge-core.mjs against the installed
+version before activation (a wrong path fails closed, never open).
+
 The base Receipts Compose still defaults to an upstream image. Changes to the
 forked .NET app or docker-entrypoint.sh do not affect that image until a
 separately built, tested and pinned fork image is deployed.
@@ -231,7 +241,10 @@ separately built, tested and pinned fork image is deployed.
   reviewer draft revisions reject stale approvals, concurrent approvals cannot
   duplicate, OCR changes preserve reviewer corrections until re-review, and
   confirm-match stores a durable bridge-side payment association with zero
-  Firefly writes. Plus: OCR/model unit spellings normalize to the canonical
+  Firefly writes. Plus: strict finalization gate (an Updated event is a signal,
+  not proof; doc-ID-bound settled-tasks + stable-revision + Paperless-AI-done
+  evidence required before any model call, fail-closed to manual review with
+  zero model calls when unproven). Plus: OCR/model unit spellings normalize to the canonical
   catalog (each/count/mass/volume), unknown units block import for review, and
   the import payload carries unitOfMeasure plus sourcePaperlessDocumentId.
 - **NOT VERIFIED:** real Paperless webhook delivery to this bridge,
