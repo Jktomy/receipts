@@ -4,9 +4,9 @@ import { renderWithProviders } from "@/test/test-utils";
 import { PublicLayout } from "./PublicLayout";
 
 describe("PublicLayout", () => {
-  it("renders the Receipts brand link", () => {
+  it("renders the Tracer brand link", () => {
     renderWithProviders(<PublicLayout />);
-    const brandLink = screen.getByText("Receipts");
+    const brandLink = screen.getByText("Tracer");
     expect(brandLink).toBeInTheDocument();
     expect(brandLink.closest("a")).toHaveAttribute("href", "/");
   });

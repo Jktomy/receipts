@@ -101,7 +101,7 @@ function renderLayout(authOverrides?: Partial<AuthContextValue>, route = "/") {
 describe("Layout", () => {
   it("renders the app brand name", () => {
     renderLayout();
-    expect(screen.getAllByText("Receipts").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Tracer").length).toBeGreaterThan(0);
   });
 
   it("renders outlet content", () => {

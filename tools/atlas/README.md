@@ -197,7 +197,7 @@ HTTPS browser URL. This GUI is source-applied, NOT production deployed.
 
 Run on Node 22+ without additional dependencies:
 
-    node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs tools/atlas/receipt-finalization.test.mjs
+    node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs tools/atlas/receipt-finalization.test.mjs tools/atlas/receipt-classification.test.mjs tools/atlas/specialist-mygarage.test.mjs tools/atlas/specialist-grocy.test.mjs
 
 A separately tested Docker image can be built from the fork's repository root
 using tools/atlas/Dockerfile. An **opt-in** Compose override is provided at
@@ -220,13 +220,24 @@ Both default OFF. Keep medical and other protected tags excluded.
 
 ATLAS_FINALIZATION_MODE=strict additionally requires doc-ID-bound proof that
 final improved OCR completed (settled Paperless tasks, stable revision across
-bounded re-fetches, and a Paperless-AI done record for that document) before
+bounded re-fetches, plus a Paperless-AI OCR record done+written-back+never-reverted
+and a non-reverted history item bound to the document) before
 any model call. Anything unproven fails closed to manual review with zero model
 calls. An Updated event alone is never proof. Keep the default OFF until the
-Paperless-AI endpoint, its token, the dedicated Receipts tag, and the
-protected-exclusion list are qualified and separately approved; confirm the two
-Paperless-AI native paths in receipt-bridge-core.mjs against the installed
-version before activation (a wrong path fails closed, never open).
+Paperless-AI endpoint, its token, the live tag IDs, and the
+protected-exclusion list are qualified and separately approved. Response shapes
+verified read-only 2026-11-21 against the installed native contract; confirm the
+three REST path strings in receipt-bridge-core.mjs read-only before activation
+(a wrong path fails closed, never open).
+
+Classification reuses existing live Paperless tags (verified 2026-11-21):
+Tracer=14 is the required receipt tag; Grocy=15 adds the `grocy` route and
+MyGarage=13 adds the `mygarage` route on the qualified draft (`routes`
+refreshes from the approval-time re-fetch). Protected exclusions, enforced in
+the native workflow filter AND the bridge before any model call:
+Medical Records=18, healthlog-apple=4, Endocrinology=17, Optometry=20
+(`ATLAS_PAPERLESS_BLOCKED_TAG_IDS`, staged default `18,4,17,20`). Never create
+another Receipts tag and never repurpose Synthetic test=2.
 
 The base Receipts Compose still defaults to an upstream image. Changes to the
 forked .NET app or docker-entrypoint.sh do not affect that image until a
