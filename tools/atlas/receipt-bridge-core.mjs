@@ -358,11 +358,24 @@ export async function getPaperlessText(fetcher, config, rawDocumentId) {
   });
   const d = await jsonResponse(response, "Paperless");
   if (Number(d?.id) !== documentId) throw new Error("Paperless returned unexpected document ID");
-  if (!Array.isArray(d.tags) || !d.tags.includes(config.requiredTagId)) throw new Error("Required receipt-analysis tag absent");
-  if (d.tags.some(tag => (config.blockedTagIds ?? []).includes(tag))) throw new Error("Document has an excluded sensitive tag");
+  const tags = Array.isArray(d.tags) ? d.tags.map(Number) : d.tags;
+  if (!Array.isArray(tags) || !tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
+  if (tags.some(tag => (config.blockedTagIds ?? []).map(Number).includes(tag))) throw new Error("Document has an excluded sensitive tag");
   if (typeof d.content !== "string" || d.content.trim().length < 20) throw new Error("Document OCR content is not ready");
   if (d.content.length > 100000) throw new Error("OCR text exceeds input limit");
-  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex") };
+  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex"), tags };
+}
+
+export function classifyRoutes(rawTags, config) {
+  if (!Array.isArray(rawTags)) throw new Error("Paperless document tags are not an array");
+  const tags = rawTags.map(Number);
+  if (!tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
+  const blocked = (config.blockedTagIds ?? []).map(Number);
+  if (tags.some(tag => blocked.includes(tag))) throw new Error("Document has an excluded sensitive tag");
+  const routes = ["tracer"];
+  if (config.grocyTagId != null && tags.includes(Number(config.grocyTagId))) routes.push("grocy");
+  if (config.myGarageTagId != null && tags.includes(Number(config.myGarageTagId))) routes.push("mygarage");
+  return routes;
 }
 
 const extractionRules = [
