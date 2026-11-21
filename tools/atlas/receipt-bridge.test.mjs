@@ -685,3 +685,47 @@ test("low-confidence draft imports only with an authenticated, draft-bound appro
     assert.equal(payload.reviewAttestation.draftRevision, String(revision));
   });
 });
+test("operator drafts readback exposes routing metadata", async () => {
+  await exerciseBridge(async ({ url, bridge }) => {
+    const accepted = await http(url + "/hooks/paperless", "POST", { sourceId: 44 }, "x-atlas-hook-key", config.webhookSecret);
+    assert.equal(accepted.status, 202);
+    const state = await untilReady(bridge, 44);
+    assert.equal(state.status, "READY_FOR_REVIEW");
+    assert.deepEqual(state.routes, ["tracer"]);
+    const list = await http(url + "/drafts", "GET", null, "x-atlas-operator-key", config.operatorSecret);
+    assert.equal(list.status, 200);
+    const body = await list.json();
+    assert.deepEqual(body.drafts.find(d => d.paperlessId === 44)?.routes, ["tracer"]);
+  });
+});
+
+test("specialist dispatch stays off by default and records null", async () => {
+  await exerciseBridge(async ({ url, bridge }) => {
+    await http(url + "/hooks/paperless", "POST", { sourceId: 44 }, "x-atlas-hook-key", config.webhookSecret);
+    await untilReady(bridge, 44);
+    const first = await http(url + "/drafts/44/import", "POST", { expectedRevision: 1 }, "x-atlas-operator-key", config.operatorSecret);
+    assert.equal(first.status, 200);
+    assert.equal(bridge.state(44).specialist, null);
+    const list = await http(url + "/drafts", "GET", null, "x-atlas-operator-key", config.operatorSecret);
+    assert.equal((await list.json()).drafts.find(d => d.paperlessId === 44)?.specialist, null);
+  });
+});
+
+test("enabled dispatch failure is recorded without touching the import", async () => {
+  const fuelDraft = {
+    merchant: "SHELL", date: "2026-11-18", currency: "USD",
+    merchantEvidence: "H-E-B 11/18/2026", dateEvidence: "11/18/2026", totalEvidence: "TOTAL 8.60",
+    total: "8.60", tax: "0.00", confidence: "high",
+    items: [{ description: "REGULAR", evidence: "MILK 1 3.99", quantity: "12.5", unit: "gal", unitPrice: "0.6880", total: "8.60" }],
+    adjustments: []
+  };
+  await exerciseBridge(async ({ url, bridge, calls }) => {
+    await http(url + "/hooks/paperless", "POST", { sourceId: 44 }, "x-atlas-hook-key", config.webhookSecret);
+    await untilReady(bridge, 44);
+    const first = await http(url + "/drafts/44/import", "POST", { expectedRevision: 1, selectedVehicleVin: "VINAAA11111111111" }, "x-atlas-operator-key", config.operatorSecret);
+    assert.equal(first.status, 200);
+    assert.equal(bridge.state(44).receiptId, "receipts-101");
+    assert.equal(bridge.state(44).specialist?.dispatched, false);
+    assert.ok(bridge.state(44).specialist?.error, "dispatch failure is recorded");
+  }, { draft: fuelDraft, document: { tags: [77, 78] }, overrides: { myGarageTagId: 78, specialistDispatch: { enabled: true, mygarage: { baseUrl: "https://mygarage-unreachable.test", token: "t", vehicles: [{ vin: "VINAAA11111111111", label: "Camry" }] } } } });
+});
