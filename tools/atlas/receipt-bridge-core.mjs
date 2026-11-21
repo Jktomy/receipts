@@ -348,7 +348,8 @@ async function jsonResponse(response, service) {
   return JSON.parse(text);
 }
 
-export async function getPaperlessText(fetcher, config, documentId) {
+export async function getPaperlessText(fetcher, config, rawDocumentId) {
+  const documentId = Number(rawDocumentId);
   if (!Number.isSafeInteger(documentId) || documentId < 1) throw new Error("Invalid Paperless ID");
   const url = apiUrl(config.paperlessUrl, "/api/documents/" + documentId + "/");
   const response = await fetcher(url, {
@@ -452,7 +453,7 @@ async function paperlessAiSettled(fetcher, config, documentId) {
     const statusRes = await fetcher(statusUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
     const st = await jsonResponse(statusRes, "Paperless-AI");
     const current = Array.isArray(st?.current) ? st.current : [];
-    if (current.some((c) => Number(c?.documentId ?? c?.id) === documentId)) {
+    if (current.some((c) => Number(c?.documentId ?? c?.id) === Number(documentId))) {
       return { settled: false, reason: "Paperless-AI still processing document " + documentId };
     }
     const queued = Array.isArray(st?.queuedDocumentIds) ? st.queuedDocumentIds : [];
@@ -487,6 +488,9 @@ export async function verifyFinalOcr(fetcher, config, source, { sleep = (ms) => 
   const maxAttempts = config.finalizationMaxAttempts ?? FINALIZATION_DEFAULTS.maxAttempts;
   const intervalMs = config.finalizationIntervalMs ?? FINALIZATION_DEFAULTS.intervalMsMs;
   const stableNeeded = config.finalizationStableReads ?? FINALIZATION_DEFAULTS.stableReads;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new Error("Invalid finalizationMaxAttempts: expected an integer >= 1");
+  if (!Number.isFinite(intervalMs) || intervalMs < 0) throw new Error("Invalid finalizationIntervalMs: expected a number >= 0");
+  if (!Number.isSafeInteger(stableNeeded) || stableNeeded < 2) throw new Error("Invalid finalizationStableReads: expected an integer >= 2, one read cannot prove stability");
   let prev = source, stable = 1, lastTasks = null, lastAi = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     lastTasks = await paperlessTasksSettled(fetcher, config, source.id);
@@ -558,8 +562,8 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
   if (!acceptedDate(start) || !acceptedDate(end) || end < start) throw new Error("Invalid Firefly date range");
   let url = apiUrl(config.fireflyUrl, "/api/v1/transactions?start=" + start + "&end=" + end + "&type=withdrawal&limit=100");
   const origin = url.origin;
-  const transactions = [], seenPages = new Set();
   let count = 0;
+  const transactions = [], seenPages = new Set();
   while (url) {
     if (++count > 100 || seenPages.has(url.href)) throw new Error("Firefly pagination exceeded safe bounds");
     seenPages.add(url.href);
@@ -570,6 +574,8 @@ export async function getFireflyWithdrawals(fetcher, config, start, end) {
     });
     const page = await jsonResponse(response, "Firefly");
     if (!Array.isArray(page?.data)) throw new Error("Malformed Firefly response");
+    if (transactions.length > 10000) throw new Error("Firefly query too large");
+    const transactions = [], seenPages = new Set();
     transactions.push(...page.data);
     if (transactions.length > 10000) throw new Error("Firefly query too large");
     const next = page?.links?.next;
