@@ -8,10 +8,10 @@ describe("MobileTabbar", () => {
   it("renders all four primary tabs plus a More button", () => {
     renderWithProviders(<MobileTabbar onOpenMore={() => {}} />);
 
-    // <a> elements: Home, Receipts, New, Reports (Link renders as anchor)
+    // <a> elements: Home, Tracer, New, Reports (Link renders as anchor)
     expect(screen.getByRole("link", { name: /home/i })).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /^receipts$/i }),
+      screen.getByRole("link", { name: /^tracer$/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^new$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /reports/i })).toBeInTheDocument();
@@ -24,16 +24,16 @@ describe("MobileTabbar", () => {
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("link", { name: /^receipts$/i })).not.toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^tracer$/i })).not.toHaveAttribute(
       "aria-current",
     );
   });
 
-  it("marks the Receipts tab active on /receipts but not on /receipts/new", () => {
+  it("marks the Tracer tab active on /receipts but not on /receipts/new", () => {
     renderWithProviders(<MobileTabbar onOpenMore={() => {}} />, {
       route: "/receipts",
     });
-    expect(screen.getByRole("link", { name: /^receipts$/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^tracer$/i })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -42,7 +42,7 @@ describe("MobileTabbar", () => {
     );
   });
 
-  it("marks the New tab active on /receipts/new and not the Receipts tab", () => {
+  it("marks the New tab active on /receipts/new and not the Tracer tab", () => {
     renderWithProviders(<MobileTabbar onOpenMore={() => {}} />, {
       route: "/receipts/new",
     });
@@ -50,18 +50,18 @@ describe("MobileTabbar", () => {
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("link", { name: /^receipts$/i })).not.toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^tracer$/i })).not.toHaveAttribute(
       "aria-current",
     );
   });
 
-  it("marks the Receipts tab active on a receipt detail route", () => {
+  it("marks the Tracer tab active on a receipt detail route", () => {
     renderWithProviders(<MobileTabbar onOpenMore={() => {}} />, {
       route: "/receipts/abc-123",
     });
     // Detail pages are still part of the receipts list workflow, so the
-    // Receipts tab stays lit — keeps mental model consistent with the desktop sidebar.
-    expect(screen.getByRole("link", { name: /^receipts$/i })).toHaveAttribute(
+    // Tracer tab stays lit — keeps mental model consistent with the desktop sidebar.
+    expect(screen.getByRole("link", { name: /^tracer$/i })).toHaveAttribute(
       "aria-current",
       "page",
     );

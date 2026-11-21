@@ -38,6 +38,7 @@ import {
 import { CommandPalette } from "@/components/CommandPalette";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/branding";
 import { resolveActiveNavItem, type NavSection } from "@/lib/nav-active";
 
 const appVersion = __APP_VERSION__;
@@ -57,7 +58,7 @@ const NAV: readonly NavSection[] = [
       { to: "/", label: "Dashboard", icon: Icon.Dashboard, kbd: "G D" },
       {
         to: "/receipts",
-        label: "Receipts",
+        label: APP_NAME,
         icon: Icon.Receipt,
         kbd: "G R",
         aliases: ["/receipts/new", "/receipts/"],
@@ -168,8 +169,8 @@ export function Layout() {
 
       <nav className="sidebar" aria-label="Primary">
         <Link to="/" className="brand">
-          <div className="mark">R</div>
-          <div className="name">Receipts</div>
+          <div className="mark">T</div>
+          <div className="name">{APP_NAME}</div>
           {showVersion && <div className="ver">{appVersion}</div>}
         </Link>
 
@@ -359,8 +360,8 @@ export function Layout() {
                 className="brand"
                 style={{ border: 0, margin: 0, padding: 0 }}
               >
-                <span className="mark">R</span>
-                <span className="name">Receipts</span>
+                <span className="mark">T</span>
+                <span className="name">{APP_NAME}</span>
               </span>
             </SheetTitle>
           </SheetHeader>
