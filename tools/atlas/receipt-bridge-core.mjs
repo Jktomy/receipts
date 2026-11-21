@@ -473,11 +473,11 @@ async function paperlessAiSettled(fetcher, config, rawDocumentId) {
     const statusRes = await fetcher(statusUrl, { method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(15000) });
     const st = await jsonResponse(statusRes, "Paperless-AI");
     const current = Array.isArray(st?.current) ? st.current : [];
-    if (current.some((c) => Number(c?.documentId ?? c?.id) === Number(documentId))) {
+    if (current.some((c) => Number(c?.documentId ?? c?.id) === documentId)) {
       return { settled: false, reason: "Paperless-AI still processing document " + documentId };
     }
     const queued = Array.isArray(st?.queuedDocumentIds) ? st.queuedDocumentIds : [];
-    if (queued.map(Number).includes(Number(documentId))) {
+    if (queued.map(Number).includes(documentId)) {
       return { settled: false, reason: "Paperless-AI has document " + documentId + " queued" };
     }
     // Installed Paperless-AI native contract (read-only verified 2026-11-21
