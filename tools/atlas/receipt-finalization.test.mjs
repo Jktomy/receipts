@@ -47,8 +47,17 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
       aiCalls++;
       const state = typeof ai === "function" ? ai(aiCalls) : ai;
       if (url.pathname === "/api/processing/status") {
+        if (state === "native-idle" || state === "native-queued") {
+          return new Response(JSON.stringify({
+            running: false, paused: false, automatic: true, scanning: false,
+            current: [], queued: state === "native-queued" ? 1 : 0,
+            lastScanAt: null, nextScanAt: null, lastError: null,
+            rateLimitedUntil: null, lastProcessed: null, processedToday: 0,
+            counts: { processed: 1, failed: 0, skipped: 0 },
+          }), { status: 200 });
+        }
         return new Response(JSON.stringify(
-          { running: true, current: state === "processing" ? [{ documentId: 9501 }] : [], queuedDocumentIds: [] }), { status: 200 });
+          { running: true, current: state === "processing" ? [{ documentId: 9501 }] : [], queuedDocumentIds: state === "legacy-queued" ? [9501] : [] }), { status: 200 });
       }
       if (url.pathname === "/api/ocr/documents/9501") {
         if (state === "ocr-pending") {
@@ -63,6 +72,12 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
           return new Response(JSON.stringify(
             { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: "2026-11-21T00:00:00Z" } }), { status: 200 });
         }
+        if (state === "native-idle" || state === "native-queued") {
+          return new Response(JSON.stringify({
+            id: 9501, title: "synth", paperlessText: ocr, ocrText: ocr, quality: "high",
+            ocr: { status: "done", at: "2026-11-20T22:00:01Z", chars: 41, meanScore: 0.99, pages: 1, totalPages: 1, provider: "synth", durationMs: 5, writtenBack: true, revertedAt: null },
+          }), { status: 200 });
+        }
         return new Response(JSON.stringify(
           { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: null } }), { status: 200 });
       }
@@ -72,6 +87,12 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
         }
         if (state === "reverted") {
           return new Response(JSON.stringify({ items: [{ documentId: 9501, revertedAt: "2026-11-21T00:00:00Z" }] }), { status: 200 });
+        }
+        if (state === "native-idle" || state === "native-queued") {
+          return new Response(JSON.stringify({
+            items: [{ id: 1, documentId: 9501, createdAt: "2026-11-20T22:00:01Z", source: "synth", provider: "synth", model: "synth", title: "synth", correspondent: null, documentType: null, tags: [77], totalTokens: 8, revertedAt: null }],
+            total: 1, filtered: 1, page: 1, pageSize: 25,
+          }), { status: 200 });
         }
         return new Response(JSON.stringify(
           { items: (state === "done" || state === "processing") ? [{ documentId: 9501, revertedAt: null }] : [] }), { status: 200 });
@@ -245,4 +266,27 @@ test("OCR done but not written back fails closed", async () => {
   assert.equal(s.status, "REVIEW_REQUIRED");
   assert.match(s.reason, /write|final OCR/i);
   assert.equal(h.stats().modelCalls, 0);
+});
+
+test("native idle queue (running:false, current:[], queued:0) finalizes", async () => {
+  const h = harness({ ai: "native-idle" });
+  const s = await drive(h);
+  assert.equal(s.status, "READY_FOR_REVIEW");
+  assert.ok(s.draft);
+});
+
+test("native unattributed queue (queued:1, no document IDs) fails closed", async () => {
+  const h = harness({ ai: "native-queued" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason || "", /queue/i);
+  assert.equal(s.draft, undefined);
+  assert.equal(h.stats().modelCalls, 0);
+});
+
+test("legacy queuedDocumentIds attribution is retained", async () => {
+  const h = harness({ ai: "legacy-queued" });
+  const s = await drive(h);
+  assert.equal(s.status, "REVIEW_REQUIRED");
+  assert.match(s.reason || "", /queued/);
 });

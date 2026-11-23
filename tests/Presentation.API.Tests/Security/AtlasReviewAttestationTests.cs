@@ -69,7 +69,7 @@ public class AtlasReviewAttestationTests
 	[Fact]
 	public void Short_ocr_digest_is_rejected()
 	{
-		string json = $$"""{"reviewer":"{{Reviewer}}","approvedAt":"2026-11-20T06:30:00Z","ocrSha256":"abcd","draftRevision":"4","finding":"{{AtlasReviewAttestation.ConfidenceFinding}}"}""";
+		string json = $$"""{"reviewer":"{{Reviewer}}","approvedAt":"{{DateTimeOffset.UtcNow:O}}","ocrSha256":"abcd","draftRevision":"4","finding":"{{AtlasReviewAttestation.ConfidenceFinding}}"}""";
 		AtlasReviewAttestation.TryParse(Header(json), Reviewer, out _, out string error).Should().BeFalse();
 		error.Should().Contain("OCR digest");
 	}
@@ -77,7 +77,7 @@ public class AtlasReviewAttestationTests
 	[Fact]
 	public void A_structural_finding_cannot_be_approved()
 	{
-		string json = $$"""{"reviewer":"{{Reviewer}}","approvedAt":"2026-11-20T06:30:00Z","ocrSha256":"{{Hash}}","draftRevision":"4","finding":"Printed total does not reconcile with items, tax and adjustments"}""";
+		string json = $$"""{"reviewer":"{{Reviewer}}","approvedAt":"{{DateTimeOffset.UtcNow:O}}","ocrSha256":"{{Hash}}","draftRevision":"4","finding":"Printed total does not reconcile with items, tax and adjustments"}""";
 		AtlasReviewAttestation.TryParse(Header(json), Reviewer, out _, out string error).Should().BeFalse();
 		error.Should().Contain("cannot be approved");
 	}
