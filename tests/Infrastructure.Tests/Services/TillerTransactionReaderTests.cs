@@ -122,13 +122,21 @@ public class TillerTransactionReaderTests
 			context.Set<TillerSyncEventEntity>().AddRange(
 				new TillerSyncEventEntity
 				{
-					Id = Guid.NewGuid(), SpreadsheetId = "sheet-1", EventType = "Full",
-					Success = true, Inserted = 5, OccurredAt = now.AddMinutes(-2),
+					Id = Guid.NewGuid(),
+					SpreadsheetId = "sheet-1",
+					EventType = "Full",
+					Success = true,
+					Inserted = 5,
+					OccurredAt = now.AddMinutes(-2),
 				},
 				new TillerSyncEventEntity
 				{
-					Id = Guid.NewGuid(), SpreadsheetId = "sheet-1", EventType = "Incremental",
-					Success = false, ErrorMessage = "boom", OccurredAt = now,
+					Id = Guid.NewGuid(),
+					SpreadsheetId = "sheet-1",
+					EventType = "Incremental",
+					Success = false,
+					ErrorMessage = "boom",
+					OccurredAt = now,
 				});
 			await context.SaveChangesAsync();
 		}
