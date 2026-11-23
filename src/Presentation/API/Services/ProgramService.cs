@@ -30,6 +30,7 @@ public static class ProgramService
 			.AddSingleton<API.Mapping.Core.AdjustmentMapper>()
 			.AddSingleton<API.Mapping.Core.ItemTemplateMapper>()
 			.AddSingleton<API.Mapping.Core.YnabMapper>()
+			.AddSingleton<API.Tiller.TillerMapper>()
 			.AddSingleton<ReceiptWithItemsMapper>()
 			.AddSingleton<TransactionAccountMapper>()
 			.AddSingleton<TripMapper>();

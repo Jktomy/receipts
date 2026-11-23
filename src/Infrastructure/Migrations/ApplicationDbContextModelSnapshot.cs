@@ -1590,6 +1590,13 @@ namespace Infrastructure.Migrations
                     b.Property<Guid?>("OccasionId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("PackageContentQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("PackageContentUnit")
+                        .HasMaxLength(16)
+                        .HasColumnType("text");
+
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,4)");
 
@@ -1627,13 +1634,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("UnitOfMeasure")
-                        .HasMaxLength(16)
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("PackageContentQuantity")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("PackageContentUnit")
                         .HasMaxLength(16)
                         .HasColumnType("text");
 
@@ -1821,6 +1821,305 @@ namespace Infrastructure.Migrations
                             IsActive = true,
                             Name = "Internet"
                         });
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerAccountMappingEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<Guid>("ReceiptsAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<string>("TillerAccountId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<string>("TillerAccountName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceiptsAccountId");
+
+                    b.ToTable("TillerAccountMappings", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerCheckpointEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Completed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("SyncedThroughDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpreadsheetId")
+                        .IsUnique();
+
+                    b.ToTable("TillerCheckpoints", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerKnownIdEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CanonicalProviderTransactionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SeenAt")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpreadsheetId", "ProviderTransactionId")
+                        .IsUnique();
+
+                    b.ToTable("TillerKnownIds", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerLinkEventEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reviewer")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderTransactionId");
+
+                    b.ToTable("TillerLinkEvents", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerReceiptLinkEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<string>("LinkKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reviewer")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SupersededAt")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderTransactionId", "ReceiptId");
+
+                    b.ToTable("TillerReceiptLinks", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerSelectedSpreadsheetEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TillerSelectedSpreadsheet", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerSyncEventEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Duplicates")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("text");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("text");
+
+                    b.Property<int>("Inserted")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<int>("Reconciled")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Updated")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TillerSyncEvents", "tiller");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerTransactionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Account")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("text");
+
+                    b.Property<string>("Institution")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SplitGroupId")
+                        .HasMaxLength(100)
+                        .HasColumnType("text");
+
+                    b.Property<string>("SpreadsheetId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("text");
+
+                    b.Property<string>("SupersededBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpreadsheetId", "ProviderTransactionId")
+                        .IsUnique();
+
+                    b.ToTable("TillerTransactions", "tiller");
                 });
 
             modelBuilder.Entity("Infrastructure.Entities.Core.TransactionEntity", b =>
@@ -3928,6 +4227,17 @@ namespace Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("Infrastructure.Entities.Core.TillerAccountMappingEntity", b =>
+                {
+                    b.HasOne("Infrastructure.Entities.Core.AccountEntity", "Account")
+                        .WithMany()
+                        .HasForeignKey("ReceiptsAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
                 });
 
             modelBuilder.Entity("Infrastructure.Entities.Core.TransactionEntity", b =>

@@ -8,7 +8,10 @@ import {
   type CurrentClassification,
   type ClassificationRequest,
 } from "@/lib/category-paths";
-import { receiptItemDraftSchema } from "@/lib/receipt-item-draft";
+import {
+  checkReceiptItemUnits,
+  receiptItemDraftSchema,
+} from "@/lib/receipt-item-draft";
 import { ReceiptNormalizationField } from "@/components/ReceiptNormalizationField";
 import {
   currentNormalizationChoice,
@@ -58,7 +61,45 @@ import {
 } from "@/components/ui/form";
 import { Spinner } from "@/components/ui/spinner";
 import { formatUnitPrice, formatCurrency } from "@/lib/format";
+import { toComparableUnitPrice, toDisplayUnitPrice } from "@/lib/unit-prices";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+
+/** Canonical units shared with Domain.Core.UnitCatalog (server). */
+const UNIT_OPTIONS = [
+  "each",
+  "count",
+  "g",
+  "kg",
+  "oz",
+  "lb",
+  "ml",
+  "l",
+  "fl_oz",
+  "cup",
+  "pt",
+  "qt",
+  "gal",
+] as const;
+/** Select sentinel for "no unit" — the schema treats blank as absent. */
+const NO_UNIT = "__none";
+
+function unitSelectValue(value: string | undefined): string {
+  return value ?? NO_UNIT;
+}
+
+function unitSelectChange(
+  next: string,
+  onChange: (value: string | undefined) => void,
+) {
+  onChange(next === NO_UNIT ? undefined : next);
+}
 
 interface ItemTemplate {
   id: string;
@@ -71,14 +112,17 @@ interface ItemTemplate {
   defaultItemCode?: string | null;
 }
 
-const receiptItemSchema = receiptItemDraftSchema.extend({
-  receiptId: z.string().min(1, "Receipt is required"),
-  receiptItemCode: z.string().trim().min(1, "Item code is required"),
-  // Provenance, not user input — there is no control bound to it (RECEIPTS-881). Set when a
-  // template is applied and cleared the moment the description stops matching that template's
-  // name, so the server never stamps an item with a canonical entry the text no longer means.
-  itemTemplateId: z.string().optional(),
-});
+const receiptItemSchema = z
+  .object({
+    ...receiptItemDraftSchema.shape,
+    receiptId: z.string().min(1, "Receipt is required"),
+    receiptItemCode: z.string().trim().min(1, "Item code is required"),
+    // Provenance, not user input — there is no control bound to it (RECEIPTS-881). Set when a
+    // template is applied and cleared the moment the description stops matching that template's
+    // name, so the server never stamps an item with a canonical entry the text no longer means.
+    itemTemplateId: z.string().optional(),
+  })
+  .superRefine(checkReceiptItemUnits);
 
 type ReceiptItemSchemaValues = z.output<typeof receiptItemSchema>;
 
@@ -184,6 +228,18 @@ export function ReceiptItemForm({
   const normalizationDescription = form.watch("description");
   const normalizationCode = form.watch("receiptItemCode");
   const watchedUnitPrice = form.watch("unitPrice");
+  const watchedUnit = form.watch("unitOfMeasure");
+  const watchedPackageQuantity = form.watch("packageContentQuantity");
+  const watchedPackageUnit = form.watch("packageContentUnit");
+  const comparableUnitPrice = toComparableUnitPrice(
+    watchedQuantity ?? 0,
+    watchedUnitPrice ?? 0,
+    watchedUnit ?? null,
+    watchedPackageQuantity ?? null,
+    watchedPackageUnit ?? null,
+  );
+  const showComparable =
+    (watchedUnit ?? watchedPackageQuantity ?? watchedPackageUnit) != null;
 
   // Resolve location: use prop if provided, otherwise derive from selected receipt
   const watchedReceiptId = form.watch("receiptId");
@@ -747,6 +803,111 @@ export function ReceiptItemForm({
             )}
           />
         </div>
+
+        <div className="flex flex-wrap gap-4">
+          <FormField
+            control={form.control}
+            name="unitOfMeasure"
+            render={({ field }) => (
+              <FormItem className="min-w-[130px] flex-1">
+                <FormLabel>Unit</FormLabel>
+                <Select
+                  value={unitSelectValue(field.value)}
+                  onValueChange={(next) =>
+                    unitSelectChange(next, field.onChange)
+                  }
+                  disabled={isSubmitting}
+                >
+                  <FormControl>
+                    <SelectTrigger aria-label="Unit">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value={NO_UNIT}>None</SelectItem>
+                    {UNIT_OPTIONS.map((unit) => (
+                      <SelectItem key={unit} value={unit}>
+                        {unit}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="packageContentQuantity"
+            render={({ field }) => (
+              <FormItem className="min-w-[140px] flex-1">
+                <FormLabel>Package quantity</FormLabel>
+                <FormControl>
+                  <Input
+                    type="number"
+                    step="any"
+                    {...field}
+                    value={field.value ?? ""}
+                    onChange={(e) =>
+                      field.onChange(
+                        Number.isNaN(e.target.valueAsNumber)
+                          ? undefined
+                          : e.target.valueAsNumber,
+                      )
+                    }
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="packageContentUnit"
+            render={({ field }) => (
+              <FormItem className="min-w-[130px] flex-1">
+                <FormLabel>Package unit</FormLabel>
+                <Select
+                  value={unitSelectValue(field.value)}
+                  onValueChange={(next) =>
+                    unitSelectChange(next, field.onChange)
+                  }
+                  disabled={isSubmitting}
+                >
+                  <FormControl>
+                    <SelectTrigger aria-label="Package unit">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value={NO_UNIT}>None</SelectItem>
+                    {UNIT_OPTIONS.map((unit) => (
+                      <SelectItem key={unit} value={unit}>
+                        {unit}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {showComparable && (
+          <div
+            className="text-sm text-muted-foreground"
+            aria-live="polite"
+          >
+            {comparableUnitPrice
+              ? `Comparable: ${formatCurrency(
+                  toDisplayUnitPrice(comparableUnitPrice).amount,
+                )} per ${toDisplayUnitPrice(comparableUnitPrice).unit}`
+              : "Not comparable: set a count unit or full package content in one dimension."}
+          </div>
+        )}
 
         <div className="text-sm text-muted-foreground">
           Total: {formatCurrency(computedTotal)}

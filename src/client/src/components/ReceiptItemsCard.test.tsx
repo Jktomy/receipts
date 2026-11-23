@@ -957,3 +957,67 @@ describe("budget choices", () => {
     });
   });
 });
+
+describe("ReceiptItemsCard units", () => {
+  const packagedItem = {
+    id: "item-pkg-1",
+    receiptItemCode: "OJ-64",
+    description: "Orange Juice",
+    quantity: 1,
+    unitPrice: 3.0,
+    unitOfMeasure: "each",
+    packageContentQuantity: 64,
+    packageContentUnit: "fl_oz",
+  };
+
+  it("pre-populates unit fields when editing a packaged item", async () => {
+    renderWithQueryClient(
+      <ReceiptItemsCard receiptId="receipt-1" items={[packagedItem]} subtotal={3} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getAllByRole("button", { name: /edit/i })[0]);
+    expect(screen.getByLabelText("Package quantity")).toHaveDisplayValue("64");
+  });
+
+  it("carries unit fields through the update payload", async () => {
+    const { useUpdateReceiptItem } = await import("@/hooks/useReceiptItems");
+    const mutate = vi.fn();
+    vi.mocked(useUpdateReceiptItem).mockReturnValue(
+      mockMutationResult({ mutate, isPending: false }),
+    );
+    renderWithQueryClient(
+      <ReceiptItemsCard receiptId="receipt-1" items={[packagedItem]} subtotal={3} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getAllByRole("button", { name: /edit/i })[0]);
+    await user.click(screen.getByRole("button", { name: "Update Item" }));
+    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
+    const { body } = mutate.mock.calls[0][0];
+    expect(body).toMatchObject({
+      id: "item-pkg-1",
+      unitOfMeasure: "each",
+      packageContentQuantity: 64,
+      packageContentUnit: "fl_oz",
+    });
+  });
+
+  it("blocks create with half-modeled package content", async () => {
+    const { useCreateReceiptItem } = await import("@/hooks/useReceiptItems");
+    const mutate = vi.fn();
+    vi.mocked(useCreateReceiptItem).mockReturnValue(
+      mockMutationResult({ mutate, isPending: false }),
+    );
+    renderWithQueryClient(
+      <ReceiptItemsCard receiptId="receipt-1" items={[]} subtotal={0} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /add item/i }));
+    await user.type(screen.getByLabelText(/description/i), "Orange Juice");
+    await user.type(screen.getByLabelText("Package quantity"), "64");
+    await user.click(screen.getByRole("button", { name: "Create Item" }));
+    expect(mutate).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/package content unit/i),
+    ).toBeInTheDocument();
+  });
+});

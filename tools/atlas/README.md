@@ -54,6 +54,22 @@ medical/sensitive tags, without latest OCR content, or with oversized text.
 It computes a SHA-256 OCR revision hash, so a change after import is held for
 human review rather than creating a second Receipts record.
 
+When a separately authorized release tag is configured, first extraction of a
+revision additionally requires NATIVE current-version release binding: the
+bridge re-reads the document's native tag history and version records and
+requires a 21-add strictly after the current-version floor (newest file
+version, plus any audited content/checksum/versions change) by an authorized
+actor, with no 21 removal at/after the authorizing add (see `evaluateReleaseBinding`).
+The installed history endpoint returns a complete newest-first bare array;
+that verified shape is the only accepted one — any paginated/envelope wrapper
+or oversized set is denied outright rather than trusted piecemeal, and no next
+link is ever followed. Tag21 presence alone never authorizes extraction.
+history, version, actor, or OCR evidence that is missing or uninterpretable
+fails closed as RELEASE_UNPROVEN_REVIEW with zero model calls. No
+caller-supplied release claim is accepted (rejected at the webhook).
+With no authorized releasers configured (R20 HOLD posture) the path denies
+everything. Import re-verifies the same binding on the current revision.
+
 A **Document Updated** event may occur before Paperless-AI has finished its
 improved OCR. A missing/unfinished OCR response is recorded as needing review,
 not silently imported. Re-send the same document ID after OCR completion;
