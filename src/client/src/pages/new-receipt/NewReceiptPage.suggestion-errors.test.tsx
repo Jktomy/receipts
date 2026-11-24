@@ -262,6 +262,7 @@ it.each([false, true])(
           location: "Manual market",
           date: "2024-01-15",
           taxAmount: 17.42,
+          taxUnknown: false,
           paidFromEnvelopeId: null,
           occasionId: null,
         },
