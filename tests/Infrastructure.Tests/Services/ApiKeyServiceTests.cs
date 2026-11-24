@@ -155,4 +155,62 @@ public class ApiKeyServiceTests
 
 		contextFactory.ResetDatabase();
 	}
+
+	[Fact]
+	public async Task CreateApiKeyAsync_StoresCanonicalScopes()
+	{
+		// Arrange
+		(IDbContextFactory<ApplicationDbContext> contextFactory, _) = DbContextWithUserHelpers.CreateInMemoryContextFactoryWithUser();
+		ApiKeyService service = new(contextFactory);
+
+		// Act — dupes and unsorted input canonicalize to sorted admitted set.
+		CreateApiKeyResult created = await service.CreateApiKeyAsync(
+			"user-a", "scoped-key", expiresAt: null, scopes: ["tiller:read", "receipts:read", "tiller:read", "admin"]);
+
+		// Assert
+		ApiKeyValidationResult? validation = await service.GetUserIdByApiKeyAsync(created.RawKey);
+		validation.Should().NotBeNull();
+		validation!.Scopes.Should().Equal("receipts:read", "tiller:read");
+
+		await using (ApplicationDbContext context = contextFactory.CreateDbContext())
+		{
+			(await context.ApiKeys.FindAsync(created.Id))!.Scopes.Should().Be("receipts:read,tiller:read");
+		}
+
+		contextFactory.ResetDatabase();
+	}
+
+	[Fact]
+	public async Task CreateApiKeyAsync_Throws_WhenNoAdmittedScope()
+	{
+		// Arrange
+		(IDbContextFactory<ApplicationDbContext> contextFactory, _) = DbContextWithUserHelpers.CreateInMemoryContextFactoryWithUser();
+		ApiKeyService service = new(contextFactory);
+
+		// Act
+		Func<Task> emptyAct = () => service.CreateApiKeyAsync("user-a", "k", expiresAt: null, scopes: []);
+		Func<Task> bogusAct = () => service.CreateApiKeyAsync("user-a", "k", expiresAt: null, scopes: ["admin"]);
+
+		// Assert
+		await emptyAct.Should().ThrowAsync<ArgumentException>();
+		await bogusAct.Should().ThrowAsync<ArgumentException>();
+
+		contextFactory.ResetDatabase();
+	}
+
+	[Fact]
+	public async Task CreateApiKeyAsync_StoresNullScopes_WhenOmitted()
+	{
+		// Arrange — legacy path: keys created without scopes stay unscoped.
+		(IDbContextFactory<ApplicationDbContext> contextFactory, _) = DbContextWithUserHelpers.CreateInMemoryContextFactoryWithUser();
+		ApiKeyService service = new(contextFactory);
+
+		// Act
+		CreateApiKeyResult created = await service.CreateApiKeyAsync("user-a", "legacy-key", expiresAt: null);
+
+		// Assert
+		(await service.GetUserIdByApiKeyAsync(created.RawKey))!.Scopes.Should().BeEmpty();
+
+		contextFactory.ResetDatabase();
+	}
 }

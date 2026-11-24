@@ -790,6 +790,7 @@ it("seeds an absent detail only as stale immediate context and verifies it with 
       location: "Market 1",
       date: "2026-01-15",
       taxAmount: 0,
+      taxUnknown: false,
     });
     expect(
       screen.getByRole("combobox", { name: /^Receipt/ }),

@@ -102,6 +102,7 @@ export function useCreateReceipt() {
       location: string;
       date: string;
       taxAmount: number;
+      taxUnknown: boolean;
     }) => {
       const { data, error } = await client.POST("/api/receipts", { ...toastErrorPolicy.request, body });
       if (error) throw error;
@@ -124,6 +125,7 @@ export function useUpdateReceipt() {
       location: string;
       date: string;
       taxAmount: number;
+      taxUnknown: boolean;
     }) => {
       const { error } = await client.PUT("/api/receipts/{id}", {
         ...toastErrorPolicy.request,

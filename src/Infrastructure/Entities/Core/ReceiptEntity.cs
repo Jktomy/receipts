@@ -11,6 +11,8 @@ public class ReceiptEntity : ISoftDeletable
 	public DateOnly Date { get; set; }
 	public decimal TaxAmount { get; set; }
 	public Currency TaxAmountCurrency { get; set; }
+	public bool TaxUnknown { get; set; }
+	public string? SourceKind { get; set; }
 	public Guid? PaidFromEnvelopeId { get; set; }
 	public Guid? OccasionId { get; set; }
 	public long? SourcePaperlessDocumentId { get; set; }

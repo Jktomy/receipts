@@ -207,6 +207,7 @@ it.each([400, 503])(
           location: "Market",
           date: "2024-01-15",
           taxAmount: 0,
+          taxUnknown: false,
           paidFromEnvelopeId: null,
           occasionId: null,
         },

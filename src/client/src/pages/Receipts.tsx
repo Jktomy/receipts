@@ -948,7 +948,7 @@ function Receipts() {
             isSubmitting={createReceipt.isPending}
             onCancel={() => setCreateOpen(false)}
             onSubmit={(values) => {
-              createReceipt.mutate(values, {
+              createReceipt.mutate({ ...values, taxUnknown: false }, {
                 onSuccess: () => setCreateOpen(false),
               });
             }}
@@ -976,7 +976,7 @@ function Receipts() {
               onCancel={() => setEditReceipt(null)}
               onSubmit={(values) => {
                 updateReceipt.mutate(
-                  { id: editReceipt.id, ...values },
+                  { id: editReceipt.id, ...values, taxUnknown: false },
                   { onSuccess: () => setEditReceipt(null) },
                 );
               }}

@@ -92,7 +92,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -127,7 +127,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, true));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, true, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -157,7 +157,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -186,7 +186,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync((ApplicationUser?)null);
 
@@ -213,7 +213,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -243,7 +243,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -277,7 +277,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))
@@ -312,7 +312,7 @@ public class ApiKeyAuthenticationHandlerTests
 		context.Request.Headers["X-API-Key"] = "valid-key";
 
 		_apiKeyServiceMock.Setup(s => s.GetUserIdByApiKeyAsync("valid-key", It.IsAny<CancellationToken>()))
-			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false));
+			.ReturnsAsync(new ApiKeyValidationResult(userId, keyId, false, []));
 		_userManagerMock.Setup(u => u.FindByIdAsync(userId))
 			.ReturnsAsync(user);
 		_userManagerMock.Setup(u => u.IsLockedOutAsync(user))

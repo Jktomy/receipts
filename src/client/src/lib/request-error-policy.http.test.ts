@@ -24,7 +24,7 @@ function deferred() {
   });
   return { promise, resolve };
 }
-const body = { location: 'Café "North"', date: "2026-09-01", taxAmount: 1.23 };
+const body = { location: 'Café "North"', date: "2026-09-01", taxAmount: 1.23, taxUnknown: false };
 
 beforeEach(async () => {
   vi.resetModules();

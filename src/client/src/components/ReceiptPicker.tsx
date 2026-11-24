@@ -47,6 +47,9 @@ export const ReceiptPicker = forwardRef<HTMLButtonElement, ReceiptPickerProps>(f
       location: receipt.location,
       date: receipt.date,
       taxAmount: receipt.taxAmount,
+      // List rows do not project taxUnknown; the seed is marked stale below
+      // and the refetched detail carries the true value.
+      taxUnknown: false,
     };
     const detailKey = [...queryKeys.receipts, receipt.id];
     // A list row is useful as an immediate label/location, but it is not allowed

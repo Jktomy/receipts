@@ -70,6 +70,16 @@ public class ApiKeyAuthenticationHandler(
 			new Claim("BypassRateLimit", validationResult.BypassRateLimit.ToString().ToLowerInvariant()),
 		];
 
+		IReadOnlyList<string> scopes = validationResult.Scopes;
+		if (scopes.Count > 0)
+		{
+			claims.Add(new Claim("ApiKeyScoped", "true"));
+			foreach (string scope in scopes)
+			{
+				claims.Add(new Claim("ApiKeyScope", scope));
+			}
+		}
+
 		if (user.Email is not null)
 		{
 			claims.Add(new Claim(ClaimTypes.Email, user.Email));

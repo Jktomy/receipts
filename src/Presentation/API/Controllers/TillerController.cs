@@ -1,3 +1,4 @@
+using API.Authentication;
 using API.Filters;
 using API.Http;
 using API.Tiller;
@@ -6,6 +7,7 @@ using Application.Interfaces.Services;
 using Application.Models.Tiller;
 using Application.Queries.Core.Tiller;
 using Asp.Versioning;
+using Common;
 using Mediator;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -30,6 +32,7 @@ public class TillerController(
 	[HttpGet("connection-status")]
 	[EndpointSummary("Get Tiller connection status")]
 	[EndpointDescription("Returns whether the read-only Tiller interface is configured, whether it is reachable, the selected spreadsheet, and the last successful sync timestamp. Performs no upstream writes.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerConnectionStatusDto>> GetConnectionStatus(CancellationToken cancellationToken)
 	{
 		TillerConnectionStatus status = await mediator.Send(new GetTillerConnectionStatusQuery(), cancellationToken);
@@ -39,6 +42,7 @@ public class TillerController(
 	[HttpGet("status")]
 	[EndpointSummary("Get Tiller sync status")]
 	[EndpointDescription("Returns the local sync checkpoint and last successful sync timestamp. Derived from local state; performs no live Tiller call.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerSyncStatusDto>> GetStatus(CancellationToken cancellationToken)
 	{
 		TillerSyncStatus status = await mediator.Send(new GetTillerSyncStatusQuery(), cancellationToken);
@@ -50,6 +54,7 @@ public class TillerController(
 	[EndpointDescription("Returns the spreadsheets available through the connected read-only Tiller interface.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireTillerConfigured]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<IReadOnlyList<TillerSpreadsheetDto>>, StatusCodeHttpResult>> GetSpreadsheets(
 		CancellationToken cancellationToken)
 	{
@@ -68,6 +73,7 @@ public class TillerController(
 	[HttpGet("settings/spreadsheet")]
 	[EndpointSummary("Get the selected Tiller spreadsheet")]
 	[EndpointDescription("Returns the currently selected readable spreadsheet ID, if any.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerSelectedSpreadsheetDto>> GetSpreadsheetSettings(CancellationToken cancellationToken)
 	{
 		string? selected = await mediator.Send(new GetSelectedTillerSpreadsheetQuery(), cancellationToken);
@@ -79,6 +85,7 @@ public class TillerController(
 	[EndpointDescription("Validates the spreadsheet against the live readable list, then stores it as the only spreadsheet Tiller reads may touch.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireTillerConfigured]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<Ok<TillerSelectedSpreadsheetDto>, BadRequestProblem, StatusCodeHttpResult>> SelectSpreadsheet(
 		[FromBody] SelectTillerSpreadsheetRequest request,
 		CancellationToken cancellationToken)
@@ -104,6 +111,7 @@ public class TillerController(
 	[EndpointDescription("Returns the financial accounts connected to Tiller. Read-only; no refresh is ever triggered.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireTillerConfigured]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<IReadOnlyList<TillerAccountDto>>, StatusCodeHttpResult>> GetAccounts(
 		CancellationToken cancellationToken)
 	{
@@ -124,6 +132,7 @@ public class TillerController(
 	[EndpointDescription("Returns the budget categories of the selected spreadsheet. Empty when no spreadsheet is selected.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireTillerConfigured]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<IReadOnlyList<TillerCategoryDto>>, StatusCodeHttpResult>> GetCategories(
 		CancellationToken cancellationToken)
 	{
@@ -144,6 +153,7 @@ public class TillerController(
 	[EndpointDescription("Backfills history or incrementally syncs new rows into the local cache through the read-only interface. Runs inline in this request; creates no scheduler, worker, or upstream writes.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireTillerConfigured]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<Ok<TillerSyncResultDto>, BadRequestProblem, StatusCodeHttpResult>> Sync(
 		[FromBody] SyncTillerRequest request,
 		CancellationToken cancellationToken)
@@ -173,6 +183,7 @@ public class TillerController(
 	[HttpGet("transactions")]
 	[EndpointSummary("List cached Tiller transactions")]
 	[EndpointDescription("Paged, filterable feed of locally cached Tiller rows with their current receipt-link overlay. Reads local cache only; performs no live Tiller call.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<TillerTransactionListDto>, BadRequestProblem>> GetTransactions(
 		[FromQuery] int offset = 0,
 		[FromQuery] int limit = 50,
@@ -214,6 +225,7 @@ public class TillerController(
 	[HttpGet("account-mappings")]
 	[EndpointSummary("List Tiller account mappings")]
 	[EndpointDescription("Returns local-account to Tiller-account mappings for the selected spreadsheet (or the requested one).")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerAccountMappingListDto>> GetAccountMappings(
 		[FromQuery] string? spreadsheetId,
 		CancellationToken cancellationToken)
@@ -226,6 +238,7 @@ public class TillerController(
 	[HttpPost("account-mappings")]
 	[EndpointSummary("Create a Tiller account mapping")]
 	[EndpointDescription("Maps one local account to one Tiller account within a single spreadsheet.")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<Ok<TillerAccountMappingResponse>, BadRequestProblem>> CreateAccountMapping(
 		[FromBody] CreateTillerAccountMappingRequest request,
 		CancellationToken cancellationToken)
@@ -245,6 +258,7 @@ public class TillerController(
 	[HttpPut("account-mappings/{id:guid}")]
 	[EndpointSummary("Update a Tiller account mapping")]
 	[EndpointDescription("Changes the Tiller side of a mapping. The spreadsheet binding can never change; delete and recreate to move spreadsheets.")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<NoContent, BadRequestProblem>> UpdateAccountMapping(
 		[FromRoute] Guid id,
 		[FromBody] UpdateTillerAccountMappingRequest request,
@@ -267,6 +281,7 @@ public class TillerController(
 	[HttpDelete("account-mappings/{id:guid}")]
 	[EndpointSummary("Delete a Tiller account mapping")]
 	[EndpointDescription("Removes a mapping. Synced rows and links are preserved; only the mapping is deleted.")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<NoContent> DeleteAccountMapping(
 		[FromRoute] Guid id,
 		CancellationToken cancellationToken)
@@ -278,6 +293,7 @@ public class TillerController(
 	[HttpGet("transactions/{providerTransactionId}/suggestion")]
 	[EndpointSummary("Get the receipt-match suggestion for a transaction")]
 	[EndpointDescription("Deterministic suggestion: exact single links lock (auto), ambiguity lists neutral candidates, missing receipts report none. Local reads only.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<TillerMatchSuggestionDto>, NotFound>> GetSuggestion(
 		[FromRoute] string providerTransactionId,
 		CancellationToken cancellationToken)
@@ -295,6 +311,7 @@ public class TillerController(
 	[HttpGet("transactions/{providerTransactionId}/history")]
 	[EndpointSummary("Get link history for a transaction")]
 	[EndpointDescription("Reviewer audit trail for confirm/unlink/auto-link actions. Local reads only.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerLinkHistoryListDto>> GetHistory(
 		[FromRoute] string providerTransactionId,
 		CancellationToken cancellationToken)
@@ -307,6 +324,7 @@ public class TillerController(
 	[HttpPost("transactions/{providerTransactionId}/confirm")]
 	[EndpointSummary("Manually confirm a receipt link")]
 	[EndpointDescription("Records an explicit human confirm. Requires a human-verified receipt; rejects already-linked receipts.")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<Ok<TillerMatchSuggestionDto>, BadRequestProblem, NotFound>> ConfirmLink(
 		[FromRoute] string providerTransactionId,
 		[FromBody] ConfirmTillerLinkRequest request,
@@ -332,6 +350,7 @@ public class TillerController(
 	[HttpPost("transactions/{providerTransactionId}/unlink")]
 	[EndpointSummary("Remove the receipt link from a transaction")]
 	[EndpointDescription("Deletes active links (history is preserved) and returns a fresh suggestion.")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	public async Task<Results<Ok<TillerMatchSuggestionDto>, NotFound>> Unlink(
 		[FromRoute] string providerTransactionId,
 		[FromBody] UnlinkTillerLinkRequest? request,
@@ -351,6 +370,7 @@ public class TillerController(
 	[HttpGet("receipts/{receiptId:guid}/payment-context")]
 	[EndpointSummary("Get payment context for a receipt")]
 	[EndpointDescription("Returns the linked Tiller row facts (account, date, category) for a receipt, if linked. Local reads only.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<TillerPaymentContextDto>, NotFound>> GetPaymentContext(
 		[FromRoute] Guid receiptId,
 		CancellationToken cancellationToken)
@@ -369,6 +389,7 @@ public class TillerController(
 	[HttpGet("events")]
 	[EndpointSummary("Get recent Tiller sync events")]
 	[EndpointDescription("Paginated, filterable feed of local sync attempts, most recent first. Local reads only.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<TillerSyncEventListDto>, BadRequestProblem>> GetEvents(
 		[FromQuery] int offset = 0,
 		[FromQuery] int limit = 50,
@@ -409,6 +430,7 @@ public class TillerController(
 	[HttpGet("analytics")]
 	[EndpointSummary("Get Tiller purchase-intelligence analytics")]
 	[EndpointDescription("Product facts from verified receipts only; unmatched bank rows as neutral context; bank and captured totals in separate buckets. Local reads only.")]
+	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Ok<TillerAnalyticsDto>> GetAnalytics(CancellationToken cancellationToken)
 	{
 		TillerAnalyticsResult result = await mediator.Send(new GetTillerAnalyticsQuery(), cancellationToken);

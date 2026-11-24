@@ -85,6 +85,8 @@ public class TillerSyncService(
 		int offset = 0;
 		DateOnly? maxDate = fromDate;
 		int pageSize = Math.Clamp(_options.DefaultPageSize, 1, _options.MaxPageSize);
+		int? expectedTotal = null;
+		HashSet<string> seenPageFingerprints = new(StringComparer.Ordinal);
 
 		try
 		{
@@ -95,6 +97,53 @@ public class TillerSyncService(
 					new TillerTransactionQuery(fromDate, null, null, "date", "asc", pageSize, offset),
 					cancellationToken);
 				pages++;
+
+				// Pagination consistency guards (verified provider contract):
+				// the provider-reported total must be present and stable, pages must
+				// be exact except the last, and no page may repeat (loop protection).
+				if (page.TotalAvailable is not int totalAvailable)
+				{
+					throw new InvalidOperationException(
+						"Tiller provider count missing; refusing partial sync.");
+				}
+
+				if (expectedTotal is null)
+				{
+					expectedTotal = totalAvailable;
+				}
+				else if (expectedTotal.Value != totalAvailable)
+				{
+					throw new InvalidOperationException(
+						$"Tiller dataset changed mid-sync (was {expectedTotal.Value}, now {totalAvailable}); refusing partial sync.");
+				}
+
+				if (page.Rows.Count > pageSize)
+				{
+					throw new InvalidOperationException(
+						$"Tiller page larger than requested ({page.Rows.Count} > {pageSize}); refusing partial sync.");
+				}
+
+				bool isLast = !page.Truncated;
+				if (isLast)
+				{
+					if (offset + page.Rows.Count != totalAvailable)
+					{
+						throw new InvalidOperationException(
+							$"Incomplete Tiller sync (have {offset + page.Rows.Count} of {totalAvailable}); refusing partial sync.");
+					}
+				}
+				else if (page.Rows.Count != pageSize)
+				{
+					throw new InvalidOperationException(
+						$"Incomplete Tiller page ({page.Rows.Count} of {pageSize} before end); refusing partial sync.");
+				}
+
+				string fingerprint = string.Join("\n", page.Rows.Select(r => r.TransactionId));
+				if (!seenPageFingerprints.Add(fingerprint))
+				{
+					throw new InvalidOperationException(
+						"Tiller repeated a page; refusing partial sync.");
+				}
 
 				foreach (TillerTransactionRow row in page.Rows)
 				{

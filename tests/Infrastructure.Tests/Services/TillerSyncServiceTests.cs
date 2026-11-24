@@ -44,7 +44,7 @@ public class TillerSyncServiceTests
 
 		List<TillerTransactionRow> page = ordered.Skip(query.Offset).Take(query.Limit).ToList();
 		bool truncated = query.Offset + page.Count < ordered.Count();
-		return new TillerTransactionPage(page, truncated);
+		return new TillerTransactionPage(page, truncated, ordered.Count());
 	}
 
 	private static TillerTransactionRow Row(
@@ -201,11 +201,13 @@ public class TillerSyncServiceTests
 					throw new HttpRequestException("simulated transport failure mid-backfill");
 				}
 
-				return Page(_rows, query with { Limit = 1 });
+				return Page(_rows, query);
 			});
 		_selectionMock.Setup(s => s.GetSelectedSpreadsheetIdAsync(It.IsAny<CancellationToken>()))
 			.ReturnsAsync(Sheet);
-		TillerSyncService service = new(_factory, _clientMock.Object, _selectionMock.Object);
+		TillerSyncService service = new(
+			_factory, _clientMock.Object, _selectionMock.Object,
+			new Tiller.TillerClientOptions { DefaultPageSize = 1, MaxPageSize = 500 });
 
 		// Act: first attempt fails partway; retry with a healthy transport completes.
 		Func<Task> failing = () => service.SyncFullAsync(CancellationToken.None);
@@ -213,7 +215,7 @@ public class TillerSyncServiceTests
 		_clientMock.Setup(c => c.QueryTransactionsAsync(
 				It.IsAny<string>(), It.IsAny<TillerTransactionQuery>(), It.IsAny<CancellationToken>()))
 			.ReturnsAsync((string _, TillerTransactionQuery query, CancellationToken _) =>
-				Page(_rows, query with { Limit = 100 }));
+				Page(_rows, query));
 		TillerSyncResult retry = await service.SyncFullAsync(CancellationToken.None);
 
 		// Assert

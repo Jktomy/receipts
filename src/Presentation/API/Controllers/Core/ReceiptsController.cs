@@ -1,3 +1,4 @@
+using API.Authentication;
 using API.Generated.Dtos;
 using API.Http;
 using API.Mapping.Core;
@@ -13,6 +14,7 @@ using Application.Exceptions;
 using Application.Models;
 using Application.Queries.Core.Receipt;
 using Asp.Versioning;
+using Common;
 using Domain.Core;
 using Mediator;
 using Microsoft.AspNetCore.Authorization;
@@ -50,6 +52,7 @@ public class ReceiptsController(
 	[HttpGet(RouteGetById)]
 	[EndpointSummary("Get a receipt by ID")]
 	[EndpointDescription("Returns a single receipt matching the provided GUID.")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsRead)]
 	public async Task<Results<Ok<ReceiptResponse>, NotFound>> GetReceiptById([FromRoute] Guid id, CancellationToken cancellationToken = default)
 	{
 		GetReceiptByIdQuery query = new(id);
@@ -67,6 +70,7 @@ public class ReceiptsController(
 
 	[HttpGet(RouteGetAll)]
 	[EndpointSummary("Get all receipts")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsRead)]
 	public async Task<Results<Ok<ReceiptListResponse>, BadRequestProblem>> GetAllReceipts([FromQuery] int offset = 0, [FromQuery] int limit = 50, [FromQuery] string? sortBy = null, [FromQuery] string? sortDirection = null, [FromQuery] Guid? accountId = null, [FromQuery] Guid? cardId = null, [FromQuery] string? q = null, [FromQuery] string? location = null, CancellationToken cancellationToken = default)
 	{
 		if (offset < 0)
@@ -129,6 +133,7 @@ public class ReceiptsController(
 	[HttpGet(RouteGetLocations)]
 	[EndpointSummary("Get distinct receipt locations sorted by frequency")]
 	[EndpointDescription("Returns distinct location strings from existing receipts, ordered by usage frequency (most-used first). Supports optional prefix filtering.")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsRead)]
 	public async Task<Results<Ok<LocationSuggestionsResponse>, BadRequestProblem>> GetLocations([FromQuery] string? q = null, [FromQuery] int limit = 20, CancellationToken cancellationToken = default)
 	{
 		if (limit <= 0 || limit > 100)
@@ -150,6 +155,7 @@ public class ReceiptsController(
 	[HttpGet(RouteGetDeleted)]
 	[EndpointSummary("Get all soft-deleted receipts")]
 	[EndpointDescription("Returns all receipts that have been soft-deleted.")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsRead)]
 	public async Task<Results<Ok<ReceiptListResponse>, BadRequestProblem>> GetDeletedReceipts([FromQuery] int offset = 0, [FromQuery] int limit = 50, [FromQuery] string? sortBy = null, [FromQuery] string? sortDirection = null, CancellationToken cancellationToken = default)
 	{
 		if (offset < 0)
@@ -201,6 +207,7 @@ public class ReceiptsController(
 
 	[HttpPost(RouteCreate)]
 	[EndpointSummary("Create a single receipt")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Ok<ReceiptResponse>> CreateReceipt([FromBody] CreateReceiptRequest model, CancellationToken cancellationToken = default)
 	{
 		CreateReceiptCommand command = new([mapper.ToDomain(model)]);
@@ -216,6 +223,7 @@ public class ReceiptsController(
 	[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest, "application/problem+json")]
 	[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden, "application/problem+json")]
 	[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict, "application/problem+json")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Results<Ok<CompleteReceiptResponse>, BadRequestProblem, ForbiddenProblem, ConflictProblem>> CreateCompleteReceipt([FromBody] CreateCompleteReceiptRequest model, CancellationToken cancellationToken = default)
 	{
 		HttpContext?.Response.OnStarting(() =>
@@ -251,6 +259,7 @@ public class ReceiptsController(
 
 	[HttpPost(RouteCreateBatch)]
 	[EndpointSummary("Create receipts in batch")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Ok<List<ReceiptResponse>>> CreateReceipts([FromBody] List<CreateReceiptRequest> models, CancellationToken cancellationToken = default)
 	{
 		CreateReceiptCommand command = new([.. models.Select(mapper.ToDomain)]);
@@ -262,12 +271,21 @@ public class ReceiptsController(
 
 	[HttpPut(RouteUpdate)]
 	[EndpointSummary("Update a single receipt")]
-	public async Task<Results<NoContent, NotFound>> UpdateReceipt([FromRoute] Guid id, [FromBody] UpdateReceiptRequest model, CancellationToken cancellationToken = default)
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
+	public async Task<Results<NoContent, NotFound, ConflictProblem>> UpdateReceipt([FromRoute] Guid id, [FromBody] UpdateReceiptRequest model, CancellationToken cancellationToken = default)
 	{
 		// Route id is authoritative; ignore any mismatched body id (RECEIPTS-793).
 		model.Id = id;
 		UpdateReceiptCommand command = new([mapper.ToDomain(model)]);
-		bool result = await mediator.Send(command, cancellationToken);
+		bool result;
+		try
+		{
+			result = await mediator.Send(command, cancellationToken);
+		}
+		catch (ProvenanceAssertionException ex)
+		{
+			return ApiProblem.Conflict(ex.Message);
+		}
 
 		if (!result)
 		{
@@ -281,10 +299,19 @@ public class ReceiptsController(
 
 	[HttpPut(RouteUpdateBatch)]
 	[EndpointSummary("Update receipts in batch")]
-	public async Task<Results<NoContent, NotFound>> UpdateReceipts([FromBody] List<UpdateReceiptRequest> models, CancellationToken cancellationToken = default)
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
+	public async Task<Results<NoContent, NotFound, ConflictProblem>> UpdateReceipts([FromBody] List<UpdateReceiptRequest> models, CancellationToken cancellationToken = default)
 	{
 		UpdateReceiptCommand command = new([.. models.Select(mapper.ToDomain)]);
-		bool result = await mediator.Send(command, cancellationToken);
+		bool result;
+		try
+		{
+			result = await mediator.Send(command, cancellationToken);
+		}
+		catch (ProvenanceAssertionException ex)
+		{
+			return ApiProblem.Conflict(ex.Message);
+		}
 
 		if (!result)
 		{
@@ -299,6 +326,7 @@ public class ReceiptsController(
 	[HttpDelete(RouteDelete)]
 	[EndpointSummary("Delete receipts")]
 	[EndpointDescription("Deletes one or more receipts by their IDs. Returns 404 if any receipt is not found.")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Results<NoContent, NotFound, ConflictProblem>> DeleteReceipts([FromBody] List<Guid> ids, CancellationToken cancellationToken = default)
 	{
 		DeleteReceiptCommand command = new(ids);
@@ -325,6 +353,7 @@ public class ReceiptsController(
 	[HttpPost(RouteRestore)]
 	[EndpointSummary("Restore a soft-deleted receipt")]
 	[EndpointDescription("Restores a previously soft-deleted receipt and its associated items and transactions.")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Results<NoContent, NotFound, ConflictProblem>> RestoreReceipt([FromRoute] Guid id, CancellationToken cancellationToken = default)
 	{
 		RestoreReceiptCommand command = new(id);
@@ -350,6 +379,7 @@ public class ReceiptsController(
 
 	[HttpPut(RouteBudgetChoices)]
 	[EndpointSummary("Set a receipt's paid-from envelope and occasion")]
+	[RequireKeyScope(ApiKeyScopes.ReceiptsWrite)]
 	public async Task<Results<NoContent, NotFound, BadRequestProblem>> SetReceiptBudgetChoices([FromRoute] Guid id,
 		[FromBody] ReceiptBudgetChoicesRequest request, CancellationToken cancellationToken = default)
 	{

@@ -6,6 +6,8 @@ public class Receipt
 	public string Location { get; set; }
 	public DateOnly Date { get; set; }
 	public Money TaxAmount { get; set; }
+	public bool TaxUnknown { get; set; }
+	public string? SourceKind { get; set; }
 	// Optional receipt-level "paid from" envelope, applied to its items as receipt-sourced.
 	public Guid? PaidFromEnvelopeId { get; set; }
 	public Guid? OccasionId { get; set; }
@@ -15,7 +17,15 @@ public class Receipt
 	public const string LocationCannotBeEmpty = "Location cannot be empty";
 	public const string SourcePaperlessDocumentIdOutOfRange = "Paperless document ID is out of range.";
 
-	public Receipt(Guid id, string location, DateOnly date, Money taxAmount)
+	public const string SourceKindUnknown = "unknown";
+
+	public static readonly string[] AdmittedSourceKinds = ["photo-observed", "user-reported", "paperless-verified"];
+
+	public const string SourceKindNotAdmitted = "Source kind is not admitted. Use photo-observed, user-reported, or paperless-verified.";
+
+	public const string PaperlessVerifiedRequiresDocumentId = "paperless-verified requires the linked Paperless document ID.";
+
+	public Receipt(Guid id, string location, DateOnly date, Money taxAmount, string? sourceKind = null, bool taxUnknown = false)
 	{
 		if (string.IsNullOrWhiteSpace(location))
 		{
@@ -26,5 +36,7 @@ public class Receipt
 		Location = location;
 		Date = date;
 		TaxAmount = taxAmount;
+		SourceKind = sourceKind;
+		TaxUnknown = taxUnknown;
 	}
 }

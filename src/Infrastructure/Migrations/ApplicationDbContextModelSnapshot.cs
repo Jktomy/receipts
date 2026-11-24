@@ -51,6 +51,10 @@ namespace Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Scopes")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1485,6 +1489,10 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("text");
 
+                    b.Property<string>("SourceKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("text");
+
                     b.Property<long?>("SourcePaperlessDocumentId")
                         .HasColumnType("bigint");
 
@@ -1494,6 +1502,11 @@ namespace Infrastructure.Migrations
                     b.Property<string>("TaxAmountCurrency")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<bool>("TaxUnknown")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.HasKey("Id");
 

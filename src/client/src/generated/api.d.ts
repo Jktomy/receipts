@@ -6708,6 +6708,13 @@ export interface components {
              * @description Optional Paperless-ngx document ID this receipt was imported from. Stored for drill-down to the original document; never a financial reference.
              */
             sourcePaperlessDocumentId?: number | null;
+            /** @description Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document. */
+            sourceKind?: string | null;
+            /**
+             * @description True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
+             * @default false
+             */
+            taxUnknown: boolean;
         };
         UpdateReceiptRequest: {
             /**
@@ -6727,6 +6734,13 @@ export interface components {
             date: string;
             /** Format: double */
             taxAmount: number;
+            /** @description Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document. */
+            sourceKind?: string | null;
+            /**
+             * @description True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
+             * @default false
+             */
+            taxUnknown: boolean;
         };
         ReceiptResponse: {
             /** Format: uuid */
@@ -6745,6 +6759,13 @@ export interface components {
              * @description Paperless-ngx document ID this receipt was imported from, if any.
              */
             sourcePaperlessDocumentId?: number | null;
+            /** @description Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document. */
+            sourceKind?: string | null;
+            /**
+             * @description True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
+             * @default false
+             */
+            taxUnknown: boolean;
         };
         ReceiptListResponse: {
             data: components["schemas"]["ReceiptListItemResponse"][];
@@ -7285,6 +7306,8 @@ export interface components {
         };
         CreateApiKeyRequest: {
             name: string;
+            /** @description Optional closed scope set narrowing this key (least privilege). Admitted: receipts:read, receipts:write, tiller:read, tiller:confirm. Absent or empty issues one ordinary full key; scopes only narrow, never widen, the owner account rights. Unknown entries are rejected. */
+            scopes: string[];
             /** Format: date-time */
             expiresAt?: string | null;
             /** @default false */
@@ -7302,12 +7325,14 @@ export interface components {
             expiresAt?: string | null;
             isRevoked: boolean;
             bypassRateLimit: boolean;
+            scopes?: string[];
         };
         CreateApiKeyResponse: {
             /** Format: uuid */
             id: string;
             name: string;
             rawKey: string;
+            scopes: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

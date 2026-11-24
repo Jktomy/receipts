@@ -50,6 +50,8 @@ public class CompleteReceiptWriter(
 				receipt.Date,
 				TaxAmount = receipt.TaxAmount.Amount,
 				TaxCurrency = receipt.TaxAmount.Currency,
+				TaxUnknown = receipt.TaxUnknown,
+				SourceKind = receipt.SourceKind,
 				receipt.PaidFromEnvelopeId,
 				receipt.OccasionId,
 				receipt.SourcePaperlessDocumentId,

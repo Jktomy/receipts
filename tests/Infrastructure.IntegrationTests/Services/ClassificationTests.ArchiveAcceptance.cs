@@ -165,6 +165,10 @@ public sealed partial class ClassificationTests
 		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"ReceiptItems\" ADD COLUMN IF NOT EXISTS \"PackageContentQuantity\" numeric(18,4)");
 		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"ReceiptItems\" ADD COLUMN IF NOT EXISTS \"PackageContentUnit\" character varying(16)");
 		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"Receipts\" ADD COLUMN IF NOT EXISTS \"SourcePaperlessDocumentId\" bigint");
+		// Provenance columns are newer than this fixture's pinned migration; add them manually so the
+		// current model can write. They are invisible to EF migrations, so the downgrade path under test is unchanged.
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"Receipts\" ADD COLUMN IF NOT EXISTS \"SourceKind\" character varying(32)");
+		await db.Database.ExecuteSqlRawAsync("ALTER TABLE receipts.\"Receipts\" ADD COLUMN IF NOT EXISTS \"TaxUnknown\" boolean NOT NULL DEFAULT false");
 		if (retainedAudit)
 		{
 			var seed = await HistoricalSeedAsync();

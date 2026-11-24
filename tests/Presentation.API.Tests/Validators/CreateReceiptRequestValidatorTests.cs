@@ -25,6 +25,83 @@ public class CreateReceiptRequestValidatorTests
 	}
 
 	[Theory]
+	[InlineData("photo-observed")]
+	[InlineData("user-reported")]
+	public void Should_Pass_When_SourceKindAdmitted(string sourceKind)
+	{
+		// Arrange
+		CreateReceiptRequest receipt = new()
+		{
+			Location = "Valid Location",
+			Date = ValidatorTestClock.Today,
+			SourceKind = sourceKind
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(receipt);
+
+		// Assert
+		Assert.True(result.IsValid);
+	}
+
+	[Fact]
+	public void Should_Pass_When_PaperlessVerifiedWithDocumentId()
+	{
+		// Arrange
+		CreateReceiptRequest receipt = new()
+		{
+			Location = "Valid Location",
+			Date = ValidatorTestClock.Today,
+			SourceKind = "paperless-verified",
+			SourcePaperlessDocumentId = 267
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(receipt);
+
+		// Assert
+		Assert.True(result.IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_SourceKindNotAdmitted()
+	{
+		// Arrange
+		CreateReceiptRequest receipt = new()
+		{
+			Location = "Valid Location",
+			Date = ValidatorTestClock.Today,
+			SourceKind = "paperless-verified-by-me"
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(receipt);
+
+		// Assert
+		Assert.False(result.IsValid);
+		Assert.Contains(result.Errors, e => e.ErrorMessage == Domain.Core.Receipt.SourceKindNotAdmitted);
+	}
+
+	[Fact]
+	public void Should_Fail_When_PaperlessVerifiedWithoutDocumentId()
+	{
+		// Arrange: the native caller must not self-assert Paperless verification.
+		CreateReceiptRequest receipt = new()
+		{
+			Location = "Valid Location",
+			Date = ValidatorTestClock.Today,
+			SourceKind = "paperless-verified"
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(receipt);
+
+		// Assert
+		Assert.False(result.IsValid);
+		Assert.Contains(result.Errors, e => e.ErrorMessage == Domain.Core.Receipt.PaperlessVerifiedRequiresDocumentId);
+	}
+
+	[Theory]
 	[InlineData(0, false)]
 	[InlineData(200, true)]
 	[InlineData(201, false)]

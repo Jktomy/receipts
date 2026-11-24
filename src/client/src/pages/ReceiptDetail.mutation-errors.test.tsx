@@ -223,6 +223,7 @@ function expectPreservedDraft() {
       location: "Draft grocery",
       date: "2026-09-01",
       taxAmount: 42.25,
+      taxUnknown: false,
     },
   ]);
 }

@@ -29,10 +29,10 @@ public class TillerMatchingServiceTests
 		return new TillerMatchingService(_factory, _catalogMock.Object);
 	}
 
-	private Guid AddReceipt(string merchant, DateOnly date, decimal total, bool verified = true)
+	private Guid AddReceipt(string merchant, DateOnly date, decimal total, bool verified = true, decimal tax = 0m, decimal tip = 0m, bool taxUnknown = false)
 	{
 		Guid id = Guid.NewGuid();
-		_snapshots.Add(new TillerReceiptSnapshot(id, merchant, date, total, verified));
+		_snapshots.Add(new TillerReceiptSnapshot(id, merchant, date, total, verified, tax, tip, taxUnknown));
 		return id;
 	}
 
@@ -80,9 +80,10 @@ public class TillerMatchingServiceTests
 	[Fact]
 	public async Task Suggest_AmountMismatch_YieldsNone()
 	{
-		// Arrange
+		// Arrange: a genuinely different amount (delta 5.01 over a 9.99 base
+		// exceeds the 25% possible-tip cap) matches nothing.
 		AddReceipt("Wholefds Mkt", new DateOnly(2026, 11, 21), 9.99m);
-		await AddTxnAsync("t-1", "2026-11-21", "WHOLEFDS MKT", -12.00m);
+		await AddTxnAsync("t-1", "2026-11-21", "WHOLEFDS MKT", -15.00m);
 
 		// Act
 		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-1", CancellationToken.None);
@@ -222,5 +223,160 @@ public class TillerMatchingServiceTests
 		context.Should().NotBeNull();
 		context!.ProviderTransactionId.Should().Be("t-1");
 		context.Account.Should().Be("Chase Checking");
+	}
+
+	[Fact]
+	public async Task Suggest_UnknownTipPlusSettledCharge_YieldsPossibleTipNeverLinks()
+	{
+		// Arrange: verified 50.00 receipt with unknown tip; settled 60.00 charge.
+		Guid receiptId = AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert: a POSSIBLE 10.00 tip, never an auto-link.
+		suggestion.Decision.Should().Be(TillerMatchDecision.PossibleTip);
+		suggestion.ReceiptId.Should().Be(receiptId);
+		suggestion.SuggestedTip.Should().Be(10.00m);
+
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerReceiptLinkEntity>().CountAsync()).Should().Be(0);
+	}
+
+	[Fact]
+	public async Task SuggestForReceipt_UnknownTipPlusSettledCharge_YieldsPossibleTip()
+	{
+		// Arrange
+		Guid receiptId = AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestForReceiptAsync("t-tip-1", receiptId, CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.PossibleTip);
+		suggestion.ReceiptId.Should().Be(receiptId);
+		suggestion.SuggestedTip.Should().Be(10.00m);
+	}
+
+	[Fact]
+	public async Task Suggest_TaxedBasePlusSettledCharge_YieldsPossibleTipOnBase()
+	{
+		// Arrange: items 46.00 + known tax 4.00 = 50.00 base; settled 60.00 charge.
+		Guid receiptId = AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 46.00m, tax: 4.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert: the tip is computed against items + tax, not items alone.
+		suggestion.Decision.Should().Be(TillerMatchDecision.PossibleTip);
+		suggestion.ReceiptId.Should().Be(receiptId);
+		suggestion.SuggestedTip.Should().Be(10.00m);
+	}
+
+	[Fact]
+	public async Task Suggest_TipAlreadyRecorded_NeverSuggestsAgain()
+	{
+		// Arrange: a 5.00 tip is already on the receipt; settled charge covers base + tip.
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m, tip: 5.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_PendingCharge_NeverSuggestsTip()
+	{
+		// Arrange: pending charges move; only settled (posted) rows suggest tips.
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m, status: "pending");
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_ExcessiveDelta_NeverSuggestsTip()
+	{
+		// Arrange: 50.00 over a 50.00 base is a different purchase, not a gratuity.
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -100.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_TaxUnknownBase_NeverSuggestsTip()
+	{
+		// Arrange: with unknown tax the base is unreliable, so no tip math.
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m, taxUnknown: true);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_UnverifiedReceipt_NeverSuggestsTip()
+	{
+		// Arrange
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m, verified: false);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-1", CancellationToken.None);
+
+		// Assert
+		suggestion.Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_ContestedTip_YieldsAmbiguous()
+	{
+		// Arrange: two identical settled charges both read as a tip on one receipt.
+		AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-a", "2026-11-20", "PHOTO CAFE", -60.00m);
+		await AddTxnAsync("t-tip-b", "2026-11-20", "PHOTO CAFE", -60.00m);
+
+		// Act
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("t-tip-a", CancellationToken.None);
+
+		// Assert: contested, never a lone suggestion.
+		suggestion.Decision.Should().Be(TillerMatchDecision.Ambiguous);
+		suggestion.SuggestedTip.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task Confirm_AfterPossibleTip_LinksManualOnly()
+	{
+		// Arrange: the human confirms the suggested tip link explicitly.
+		Guid receiptId = AddReceipt("Photo Cafe", new DateOnly(2026, 11, 20), 50.00m);
+		await AddTxnAsync("t-tip-1", "2026-11-20", "PHOTO CAFE", -60.00m);
+		TillerMatchingService service = CreateService();
+
+		// Act
+		TillerMatchSuggestion confirmation = await service.ConfirmAsync("t-tip-1", receiptId, "tester", CancellationToken.None);
+
+		// Assert
+		confirmation.Decision.Should().Be(TillerMatchDecision.Manual);
+		confirmation.ReceiptId.Should().Be(receiptId);
+		TillerMatchSuggestion recheck = await service.SuggestAsync("t-tip-1", CancellationToken.None);
+		recheck.Decision.Should().Be(TillerMatchDecision.Manual);
 	}
 }

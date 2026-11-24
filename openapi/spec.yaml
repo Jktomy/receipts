@@ -14845,6 +14845,14 @@ components:
           type: ["integer", "null"]
           format: int64
           description: Optional Paperless-ngx document ID this receipt was imported from. Stored for drill-down to the original document; never a financial reference.
+        sourceKind:
+          type: [string, "null"]
+          maxLength: 32
+          description: 'Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document.'
+        taxUnknown:
+          type: boolean
+          default: false
+          description: True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
 
     UpdateReceiptRequest:
       type: object
@@ -14871,6 +14879,14 @@ components:
         taxAmount:
           type: number
           format: double
+        sourceKind:
+          type: [string, "null"]
+          maxLength: 32
+          description: 'Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document.'
+        taxUnknown:
+          type: boolean
+          default: false
+          description: True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
 
     ReceiptResponse:
       type: object
@@ -14897,6 +14913,14 @@ components:
           type: ["integer", "null"]
           format: int64
           description: Paperless-ngx document ID this receipt was imported from, if any.
+        sourceKind:
+          type: [string, "null"]
+          maxLength: 32
+          description: 'Provenance of this record: photo-observed (fields read from a receipt photo by the recording agent; image itself is transient unless Paperless archival applies), user-reported (human-described without a source document), paperless-verified (imported from the linked Paperless document and requires sourcePaperlessDocumentId). Null means unknown. Never invent paperless-verified without the linked document.'
+        taxUnknown:
+          type: boolean
+          default: false
+          description: True when tax was not observed. taxAmount is then an API-mandated placeholder (usually 0), not a measured fact. Readers must treat totals containing unknown tax as estimates.
 
     ReceiptListResponse:
       type: object
@@ -15845,10 +15869,15 @@ components:
 
     CreateApiKeyRequest:
       type: object
-      required: [name]
+      required: [name, scopes]
       properties:
         name:
           type: string
+        scopes:
+          type: array
+          items:
+            type: string
+          description: 'Optional closed scope set narrowing this key (least privilege). Admitted: receipts:read, receipts:write, tiller:read, tiller:confirm. Absent or empty issues one ordinary full key; scopes only narrow, never widen, the owner account rights. Unknown entries are rejected.'
         expiresAt:
           type:
             - string
@@ -15884,10 +15913,14 @@ components:
           type: boolean
         bypassRateLimit:
           type: boolean
+        scopes:
+          type: array
+          items:
+            type: string
 
     CreateApiKeyResponse:
       type: object
-      required: [id, name, rawKey, createdAt, bypassRateLimit]
+      required: [id, name, rawKey, createdAt, bypassRateLimit, scopes]
       properties:
         id:
           type: string
@@ -15896,6 +15929,10 @@ components:
           type: string
         rawKey:
           type: string
+        scopes:
+          type: array
+          items:
+            type: string
         createdAt:
           type: string
           format: date-time

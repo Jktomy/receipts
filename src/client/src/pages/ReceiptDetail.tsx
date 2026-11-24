@@ -135,6 +135,7 @@ function ReceiptDetail() {
         location: values.location,
         date: values.date,
         taxAmount: values.taxAmount,
+        taxUnknown: false,
       },
       {
         onSuccess: () => setEditOpen(false),

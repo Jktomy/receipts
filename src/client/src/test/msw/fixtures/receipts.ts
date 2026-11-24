@@ -4,12 +4,14 @@ export const receipts = [
     location: "Walmart",
     date: "2024-06-15",
     taxAmount: 5.25,
+    taxUnknown: false,
   },
   {
     id: "bbbb2222-2222-2222-2222-222222222222",
     location: "Target",
     date: "2024-06-20",
     taxAmount: 3.50,
+    taxUnknown: false,
   },
 ];
 
