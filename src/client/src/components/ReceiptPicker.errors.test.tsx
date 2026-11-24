@@ -634,6 +634,7 @@ it("does not present an obsolete next-page failure as the retry for a newly type
   await screen.findByRole("option");
   const search = screen.getByPlaceholderText("Search receipts...");
   await user.type(search, "Alpha");
+  await waitFor(() => expect(searches).toContain("Alpha"));
   await screen.findByRole("option", { name: /Alpha market/ });
   await user.click(screen.getByRole("button", { name: "Load more receipts" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
