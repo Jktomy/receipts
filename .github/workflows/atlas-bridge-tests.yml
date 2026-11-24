@@ -78,4 +78,4 @@ jobs:
           node --check tools/atlas/receipt-bridge-core.mjs
           node --check tools/atlas/receipt-bridge-server.mjs
       - name: Run isolated synthetic tests
-        run: node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs
+        run: node --test tools/atlas/receipt-match.test.mjs tools/atlas/receipt-bridge.test.mjs tools/atlas/receipt-release-destination.test.mjs tools/atlas/receipt-source-status.test.mjs tools/atlas/receipt-release-binding.test.mjs tools/atlas/receipt-release-gate.test.mjs tools/atlas/receipt-p4-queued-crosscheck.test.mjs tools/atlas/receipt-finalization.test.mjs
