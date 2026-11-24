@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using API.Controllers;
 using API.Generated.Dtos;
+using API.Http;
 using Application.Interfaces.Services;
 using Common;
 using FluentAssertions;
@@ -57,8 +58,8 @@ public class ApiKeyControllerTests
 		SetupUserClaims("user-123");
 		List<ApiKeyInfo> keys =
 		[
-			new(Guid.NewGuid(), "key-1", DateTimeOffset.UtcNow, null, null, false, false),
-			new(Guid.NewGuid(), "key-2", DateTimeOffset.UtcNow, null, DateTimeOffset.UtcNow.AddDays(30), false, true),
+			new(Guid.NewGuid(), "key-1", DateTimeOffset.UtcNow, null, null, false, false, ["tiller:read"]),
+			new(Guid.NewGuid(), "key-2", DateTimeOffset.UtcNow, null, DateTimeOffset.UtcNow.AddDays(30), false, true, []),
 		];
 		_apiKeyServiceMock.Setup(s => s.GetApiKeysForUserAsync("user-123", It.IsAny<CancellationToken>())).ReturnsAsync(keys);
 
@@ -86,11 +87,11 @@ public class ApiKeyControllerTests
 		Guid keyId = Guid.NewGuid();
 		DateTimeOffset createdAt = DateTimeOffset.UtcNow;
 
-		_apiKeyServiceMock.Setup(s => s.CreateApiKeyAsync("user-123", "my-key", null, false, It.IsAny<CancellationToken>()))
+		_apiKeyServiceMock.Setup(s => s.CreateApiKeyAsync("user-123", "my-key", null, false, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
 			.ReturnsAsync(new CreateApiKeyResult("raw-key-value", keyId, createdAt));
 
-		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.CreateApiKey(
-			new CreateApiKeyRequest { Name = "my-key" });
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "my-key", Scopes = ["tiller:read", "receipts:read"] });
 
 		Ok<CreateApiKeyResponse> okResult = Assert.IsType<Ok<CreateApiKeyResponse>>(result.Result);
 		okResult.Value!.Id.Should().Be(keyId);
@@ -98,13 +99,44 @@ public class ApiKeyControllerTests
 		okResult.Value!.Name.Should().Be("my-key");
 		okResult.Value!.CreatedAt.Should().Be(createdAt);
 		okResult.Value!.BypassRateLimit.Should().BeFalse();
+		okResult.Value!.Scopes.Should().BeEquivalentTo("receipts:read", "tiller:read");
+	}
+
+	[Fact]
+	public async Task CreateApiKey_ReturnsOkFullKey_WhenScopesEmpty()
+	{
+		SetupUserClaims("user-123");
+		Guid keyId = Guid.NewGuid();
+		DateTimeOffset createdAt = DateTimeOffset.UtcNow;
+
+		_apiKeyServiceMock.Setup(s => s.CreateApiKeyAsync("user-123", "my-key", null, false, null, It.IsAny<CancellationToken>()))
+			.ReturnsAsync(new CreateApiKeyResult("raw-key-value", keyId, createdAt));
+
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "my-key", Scopes = [] });
+
+		Ok<CreateApiKeyResponse> okResult = Assert.IsType<Ok<CreateApiKeyResponse>>(result.Result);
+		okResult.Value!.RawKey.Should().Be("raw-key-value");
+		okResult.Value!.Scopes.Should().BeEmpty();
+		_apiKeyServiceMock.Verify(s => s.CreateApiKeyAsync("user-123", "my-key", null, false, null, It.IsAny<CancellationToken>()), Times.Once);
+	}
+
+	[Fact]
+	public async Task CreateApiKey_ReturnsBadRequest_WhenScopeNotAdmitted()
+	{
+		SetupUserClaims("user-123");
+
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "my-key", Scopes = ["tiller:read", "admin"] });
+
+		Assert.IsType<BadRequestProblem>(result.Result);
 	}
 
 	[Fact]
 	public async Task CreateApiKey_ReturnsUnauthorized_WhenNoClaims()
 	{
-		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.CreateApiKey(
-			new CreateApiKeyRequest { Name = "my-key" });
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "my-key", Scopes = ["tiller:read"] });
 
 		Assert.IsType<UnauthorizedHttpResult>(result.Result);
 	}
@@ -116,11 +148,11 @@ public class ApiKeyControllerTests
 		Guid keyId = Guid.NewGuid();
 		DateTimeOffset createdAt = DateTimeOffset.UtcNow;
 
-		_apiKeyServiceMock.Setup(s => s.CreateApiKeyAsync("admin-123", "bypass-key", null, true, It.IsAny<CancellationToken>()))
+		_apiKeyServiceMock.Setup(s => s.CreateApiKeyAsync("admin-123", "bypass-key", null, true, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
 			.ReturnsAsync(new CreateApiKeyResult("raw-key-value", keyId, createdAt));
 
-		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.CreateApiKey(
-			new CreateApiKeyRequest { Name = "bypass-key", BypassRateLimit = true });
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "bypass-key", BypassRateLimit = true, Scopes = ["tiller:read"] });
 
 		Ok<CreateApiKeyResponse> okResult = Assert.IsType<Ok<CreateApiKeyResponse>>(result.Result);
 		okResult.Value!.BypassRateLimit.Should().BeTrue();
@@ -131,8 +163,8 @@ public class ApiKeyControllerTests
 	{
 		SetupUserClaims("user-123");
 
-		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.CreateApiKey(
-			new CreateApiKeyRequest { Name = "bypass-key", BypassRateLimit = true });
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "bypass-key", BypassRateLimit = true, Scopes = ["tiller:read"] });
 
 		Assert.IsType<ForbidHttpResult>(result.Result);
 	}
@@ -145,7 +177,7 @@ public class ApiKeyControllerTests
 		SetupUserClaims("user-123");
 		Guid keyId = Guid.NewGuid();
 
-		Results<NoContent, UnauthorizedHttpResult> result = await _controller.RevokeApiKey(keyId);
+		Results<NoContent, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.RevokeApiKey(keyId);
 
 		Assert.IsType<NoContent>(result.Result);
 		_apiKeyServiceMock.Verify(s => s.RevokeApiKeyAsync(keyId, "user-123", It.IsAny<CancellationToken>()), Times.Once);
@@ -154,8 +186,69 @@ public class ApiKeyControllerTests
 	[Fact]
 	public async Task RevokeApiKey_ReturnsUnauthorized_WhenNoClaims()
 	{
-		Results<NoContent, UnauthorizedHttpResult> result = await _controller.RevokeApiKey(Guid.NewGuid());
+		Results<NoContent, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.RevokeApiKey(Guid.NewGuid());
 
 		Assert.IsType<UnauthorizedHttpResult>(result.Result);
+	}
+
+	private void SetupApiKeyClaims(string userId, Guid keyId, bool scoped)
+	{
+		List<Claim> claims =
+		[
+			new Claim(ClaimTypes.NameIdentifier, userId),
+			new Claim("ApiKeyId", keyId.ToString()),
+		];
+		if (scoped)
+		{
+			claims.Add(new Claim("ApiKeyScoped", "true"));
+			claims.Add(new Claim("ApiKeyScope", "receipts:read"));
+		}
+
+		ClaimsIdentity identity = new(claims, "ApiKey");
+		_controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(identity);
+	}
+
+	[Fact]
+	public async Task CreateApiKey_ReturnsForbid_WhenScopedApiKey()
+	{
+		SetupApiKeyClaims("user-123", Guid.NewGuid(), scoped: true);
+
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "self-minted", Scopes = [] });
+
+		Assert.IsType<ForbidHttpResult>(result.Result);
+	}
+
+	[Fact]
+	public async Task RevokeApiKey_ReturnsForbid_WhenScopedApiKey()
+	{
+		SetupApiKeyClaims("user-123", Guid.NewGuid(), scoped: true);
+
+		Results<NoContent, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.RevokeApiKey(Guid.NewGuid());
+
+		Assert.IsType<ForbidHttpResult>(result.Result);
+		_apiKeyServiceMock.Verify(s => s.RevokeApiKeyAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+	}
+
+	[Fact]
+	public async Task RevokeApiKey_ReturnsForbid_WhenFullApiKey()
+	{
+		SetupApiKeyClaims("user-123", Guid.NewGuid(), scoped: false);
+
+		Results<NoContent, UnauthorizedHttpResult, ForbidHttpResult> result = await _controller.RevokeApiKey(Guid.NewGuid());
+
+		Assert.IsType<ForbidHttpResult>(result.Result);
+		_apiKeyServiceMock.Verify(s => s.RevokeApiKeyAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+	}
+
+	[Fact]
+	public async Task CreateApiKey_ReturnsForbid_WhenFullApiKey()
+	{
+		SetupApiKeyClaims("user-123", Guid.NewGuid(), scoped: false);
+
+		Results<Ok<CreateApiKeyResponse>, UnauthorizedHttpResult, ForbidHttpResult, BadRequestProblem> result = await _controller.CreateApiKey(
+			new CreateApiKeyRequest { Name = "self-minted", Scopes = [] });
+
+		Assert.IsType<ForbidHttpResult>(result.Result);
 	}
 }

@@ -19,8 +19,9 @@ public partial class ReceiptMapper
 			Guid.Empty,
 			source.Location,
 			source.Date,
-			new Money((decimal)source.TaxAmount, Currency.USD)
-		)
+			new Money((decimal)source.TaxAmount, Currency.USD),
+			source.SourceKind,
+			source.TaxUnknown)
 		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId, SourcePaperlessDocumentId = source.SourcePaperlessDocumentId };
 	}
 
@@ -30,8 +31,9 @@ public partial class ReceiptMapper
 			source.Id,
 			source.Location,
 			source.Date,
-			new Money((decimal)source.TaxAmount, Currency.USD)
-		)
+			new Money((decimal)source.TaxAmount, Currency.USD),
+			source.SourceKind,
+			source.TaxUnknown)
 		{ PaidFromEnvelopeId = source.PaidFromEnvelopeId, OccasionId = source.OccasionId };
 	}
 

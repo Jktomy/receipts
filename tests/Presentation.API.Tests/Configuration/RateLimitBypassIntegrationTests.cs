@@ -255,13 +255,13 @@ public class RateLimitBypassIntegrationTests
 		Mock<IApiKeyService> apiKeyService = new();
 		apiKeyService
 			.Setup(s => s.GetUserIdByApiKeyAsync(BypassApiKey))
-			.ReturnsAsync(new ApiKeyValidationResult(TestUserId, Guid.NewGuid(), true));
+			.ReturnsAsync(new ApiKeyValidationResult(TestUserId, Guid.NewGuid(), true, []));
 		apiKeyService
 			.Setup(s => s.GetUserIdByApiKeyAsync(NormalApiKey))
-			.ReturnsAsync(new ApiKeyValidationResult(TestUserId, Guid.NewGuid(), false));
+			.ReturnsAsync(new ApiKeyValidationResult(TestUserId, Guid.NewGuid(), false, []));
 		apiKeyService
 			.Setup(s => s.GetUserIdByApiKeyAsync(SecondUserApiKey))
-			.ReturnsAsync(new ApiKeyValidationResult(SecondUserId, Guid.NewGuid(), false));
+			.ReturnsAsync(new ApiKeyValidationResult(SecondUserId, Guid.NewGuid(), false, []));
 		appBuilder.Services.AddSingleton(apiKeyService.Object);
 
 		// Mock other dependencies required by ApiKeyAuthenticationHandler

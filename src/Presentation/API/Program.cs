@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using API.Configuration;
 using API.Hubs;
+using API.Mcp;
 using API.Middleware;
 using API.Services;
 using Application.NormalizationAi;
@@ -53,6 +54,10 @@ IServiceCollection services = builder.Services
 	.RegisterProgramServices()
 	.RegisterApplicationServices(builder.Configuration)
 	.RegisterInfrastructureServices(builder.Configuration);
+
+// In-process MCP face: same Kestrel pipeline, same auth schemes, fixed typed
+// tools only (see API.Mcp.TracerMcpTools). No new port/service/auth system.
+services.AddMcpServer().WithHttpTransport().WithTools<TracerMcpTools>();
 
 services.AddJevServices();
 
@@ -135,6 +140,10 @@ app.MapDefaultEndpoints();
 
 // Map controllers
 app.MapControllers();
+
+// MCP Streamable-HTTP on the same host/port. Default authorization policy
+// (PolicyScheme: API key or owner JWT). Key-management is not exposed.
+app.MapMcp("/mcp").RequireAuthorization();
 
 // Map SignalR hubs
 app.MapHub<EntityHub>("/hubs/entities");

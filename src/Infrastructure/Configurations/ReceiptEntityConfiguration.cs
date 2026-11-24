@@ -25,6 +25,12 @@ public class ReceiptEntityConfiguration : IEntityTypeConfiguration<ReceiptEntity
 		builder.Property(e => e.ProcessedImagePath)
 			.HasMaxLength(1024);
 
+		builder.Property(e => e.SourceKind)
+			.HasMaxLength(32);
+
+		builder.Property(e => e.TaxUnknown)
+			.HasDefaultValue(false);
+
 		// RECEIPTS-787: the default receipt list sorts by Date desc with offset pagination and
 		// every DashboardService/report method filters Date within a range — all under the
 		// DeletedAt IS NULL soft-delete filter. Without this the Receipts table has only its PK,

@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Application.Exceptions;
 using Application.Interfaces.Services;
 using Application.Models;
 using Domain.NormalizedDescriptions;
@@ -292,6 +293,14 @@ public class ReceiptRepository(IDbContextFactory<ApplicationDbContext> contextFa
 			existingEntity.Date = entity.Date;
 			existingEntity.TaxAmount = entity.TaxAmount;
 			existingEntity.TaxAmountCurrency = entity.TaxAmountCurrency;
+			existingEntity.TaxUnknown = entity.TaxUnknown;
+			if (string.Equals(entity.SourceKind, "paperless-verified", StringComparison.Ordinal)
+				&& existingEntity.SourcePaperlessDocumentId is null)
+			{
+				throw new ProvenanceAssertionException(Domain.Core.Receipt.PaperlessVerifiedRequiresDocumentId);
+			}
+
+			existingEntity.SourceKind = entity.SourceKind;
 			// Omitted choices keep the stored ones; a new choice applies to the receipt's items.
 			await ItemEnvelopeWriter.ApplyReceiptChoicesAsync(context, existingEntity,
 				entity.PaidFromEnvelopeId ?? existingEntity.PaidFromEnvelopeId,

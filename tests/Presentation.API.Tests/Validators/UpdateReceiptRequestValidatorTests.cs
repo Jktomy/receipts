@@ -25,6 +25,50 @@ public class UpdateReceiptRequestValidatorTests
 		Assert.True(result.IsValid);
 	}
 
+	[Theory]
+	[InlineData("photo-observed")]
+	[InlineData("user-reported")]
+	[InlineData("paperless-verified")]
+	public void Should_Pass_When_SourceKindAdmitted(string sourceKind)
+	{
+		// Arrange: update checks the admitted set; the linked-document guard
+		// for a newly asserted paperless-verified kind is enforced at update
+		// time against the stored receipt, not from this request alone.
+		UpdateReceiptRequest request = new()
+		{
+			Id = Guid.NewGuid(),
+			Location = "Store",
+			Date = ValidatorTestClock.Today,
+			SourceKind = sourceKind
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(request);
+
+		// Assert
+		Assert.True(result.IsValid);
+	}
+
+	[Fact]
+	public void Should_Fail_When_SourceKindNotAdmitted()
+	{
+		// Arrange
+		UpdateReceiptRequest request = new()
+		{
+			Id = Guid.NewGuid(),
+			Location = "Store",
+			Date = ValidatorTestClock.Today,
+			SourceKind = "paperless-verified-by-me"
+		};
+
+		// Act
+		FluentValidation.Results.ValidationResult result = _validator.Validate(request);
+
+		// Assert
+		Assert.False(result.IsValid);
+		Assert.Contains(result.Errors, e => e.ErrorMessage == Domain.Core.Receipt.SourceKindNotAdmitted);
+	}
+
 	[Fact]
 	public void Should_Fail_When_IdIsEmpty()
 	{

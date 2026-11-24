@@ -7,4 +7,11 @@
     -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
+  <PropertyGroup>
+    <!-- Scratch-tree hygiene (LOCAL-ONLY; revert before commit):
+      stale root-owned build-output copies renamed to *.rootbak so the active
+      atlas-owned obj/bin can rebuild. These copies are never source.
+      Property (not item): evaluated before the SDK's default Compile globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/*.rootbak/**</DefaultItemExcludes>
+  </PropertyGroup>
 </Project>

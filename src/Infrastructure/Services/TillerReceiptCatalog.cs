@@ -1,5 +1,6 @@
 using Application.Interfaces.Services;
 using Application.Models.Tiller;
+using Common;
 using Domain.NormalizedDescriptions;
 using Infrastructure.Entities.Core;
 using Microsoft.EntityFrameworkCore;
@@ -105,6 +106,12 @@ public class TillerReceiptCatalog(
 			receipt.Location,
 			receipt.Date,
 			items.Sum(i => i.TotalAmount),
-			items.All(i => i.NormalizationReviewState == NormalizationReviewState.Verified));
+			items.All(i => i.NormalizationReviewState == NormalizationReviewState.Verified),
+			receipt.TaxAmount,
+			await context.Set<AdjustmentEntity>()
+				.AsNoTracking()
+				.Where(a => a.ReceiptId == receipt.Id && a.Type == AdjustmentType.Tip && a.DeletedAt == null)
+				.SumAsync(a => (decimal?)a.Amount) ?? 0m,
+			receipt.TaxUnknown);
 	}
 }

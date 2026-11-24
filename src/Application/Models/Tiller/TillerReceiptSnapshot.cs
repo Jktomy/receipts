@@ -7,7 +7,10 @@ public sealed record TillerReceiptSnapshot(
 	string Merchant,
 	DateOnly Date,
 	decimal Total,
-	bool AllItemsVerified);
+	bool AllItemsVerified,
+	decimal TaxTotal = 0m,
+	decimal TipTotal = 0m,
+	bool TaxUnknown = false);
 
 // One human-verified line item. Only lines from all-verified receipts are
 // ever returned; product facts come exclusively from these rows.

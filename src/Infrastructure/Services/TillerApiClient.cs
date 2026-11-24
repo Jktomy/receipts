@@ -557,7 +557,26 @@ public class TillerApiClient(
 			? items.EnumerateArray().Select(ParseRow).Where(r => r is not null).Select(r => r!).ToList()
 			: [];
 
-		return new TillerTransactionPage(rows, rows.Count >= limit);
+		// Provider-reported total for pagination consistency guards (missing = unknown).
+		int? totalAvailable = null;
+		if (root.TryGetProperty("audit", out JsonElement audit) &&
+			audit.TryGetProperty("pipeline", out JsonElement pipeline) &&
+			pipeline.ValueKind == JsonValueKind.Array)
+		{
+			foreach (JsonElement step in pipeline.EnumerateArray())
+			{
+				if (step.TryGetProperty("kind", out JsonElement kind) &&
+					kind.GetString() == "load" &&
+					step.TryGetProperty("rowsAvailable", out JsonElement total) &&
+					total.TryGetInt32(out int n) && n >= 0)
+				{
+					totalAvailable = n;
+					break;
+				}
+			}
+		}
+
+		return new TillerTransactionPage(rows, rows.Count >= limit, totalAvailable);
 	}
 
 	// Rows carry every column under its exact sheet header text (e.g.

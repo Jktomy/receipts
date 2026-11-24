@@ -18,6 +18,11 @@ public class TillerMatchingService(
 {
 	private const int WindowDays = 3;
 
+	// A settled charge above a verified receipt base by a modest delta is a
+	// POSSIBLE tip — a suggestion for HUMAN confirmation only. The delta is
+	// capped so a genuinely different purchase never reads as a gratuity.
+	private const decimal MaxTipRatio = 0.25m;
+
 	public async Task<TillerMatchSuggestion> SuggestAsync(
 		string providerTransactionId,
 		CancellationToken cancellationToken)
@@ -48,7 +53,7 @@ public class TillerMatchingService(
 		List<TillerMatchCandidate> pairs = await MatchingReceiptsAsync(context, txn, cancellationToken);
 		if (pairs.Count == 0)
 		{
-			return new TillerMatchSuggestion(TillerMatchDecision.None, null, null, []);
+			return await SuggestPossibleTipAsync(context, txn, cancellationToken);
 		}
 
 		if (pairs.Count == 1)
@@ -103,6 +108,20 @@ public class TillerMatchingService(
 		TillerReceiptSnapshot? receipt = await receiptCatalog.GetReceiptSnapshotAsync(receiptId, cancellationToken);
 		if (receipt is null || MatchEvidence(receipt, txn) is null)
 		{
+			// No exact total: a settled charge above a verified, tax-known,
+			// tip-free receipt base is a POSSIBLE tip for HUMAN confirmation.
+			// Never auto-links; a row already linked elsewhere stays silent.
+			if (receipt is not null
+				&& !await HasActiveLinkAsync(context, txn.ProviderTransactionId, cancellationToken)
+				&& TryPossibleTip(receipt, txn, out decimal possibleTip))
+			{
+				return await WithConfidenceAsync(
+					new TillerMatchSuggestion(TillerMatchDecision.PossibleTip, receiptId, null, [], possibleTip),
+					txn,
+					receiptId,
+					cancellationToken);
+			}
+
 			return new TillerMatchSuggestion(TillerMatchDecision.None, null, null, []);
 		}
 
@@ -388,13 +407,159 @@ public class TillerMatchingService(
 			return null;
 		}
 
-		if (!MerchantMatches(receipt.Merchant, txn.Description))
+		return MatchWindow(receipt.Merchant, receipt.Date, txn);
+	}
+
+	// Merchant + date window only (no amount comparison): shared by exact
+	// matches and tip hypotheses so both use identical identity evidence.
+	private static int? MatchWindow(string merchant, DateOnly date, TillerTransactionEntity txn)
+	{
+		if (!MerchantMatches(merchant, txn.Description))
 		{
 			return null;
 		}
 
-		int days = Math.Abs(receipt.Date.DayNumber - txn.Date.DayNumber);
+		int days = Math.Abs(date.DayNumber - txn.Date.DayNumber);
 		return days <= WindowDays ? days : null;
+	}
+
+	// A possible tip: verified receipt base (items + known tax, no tip yet)
+	// below a settled posted charge by a modest delta. Suggestion ONLY —
+	// callers must never auto-link from this; human confirmation required.
+	private static bool TryPossibleTip(TillerReceiptSnapshot receipt, TillerTransactionEntity txn, out decimal tip)
+	{
+		tip = 0m;
+		if (!receipt.AllItemsVerified || receipt.TaxUnknown || receipt.TipTotal != 0m)
+		{
+			return false;
+		}
+
+		if (!string.Equals(txn.Status, "posted", StringComparison.OrdinalIgnoreCase) || txn.Amount >= 0)
+		{
+			return false;
+		}
+
+		decimal @base = receipt.Total + receipt.TaxTotal;
+		if (@base <= 0m)
+		{
+			return false;
+		}
+
+		decimal delta = -txn.Amount - @base;
+		if (delta <= 0m || delta > @base * MaxTipRatio)
+		{
+			return false;
+		}
+
+		if (!MatchWindow(receipt.Merchant, receipt.Date, txn).HasValue)
+		{
+			return false;
+		}
+
+		tip = delta;
+		return true;
+	}
+
+	private async Task<TillerMatchSuggestion> SuggestPossibleTipAsync(
+		ApplicationDbContext context,
+		TillerTransactionEntity txn,
+		CancellationToken cancellationToken)
+	{
+		IReadOnlyList<TillerReceiptSnapshot> receipts =
+			await receiptCatalog.GetReceiptSnapshotsAsync(cancellationToken);
+
+		List<(Guid ReceiptId, int Days, decimal Tip)> tips = [];
+		foreach (TillerReceiptSnapshot receipt in receipts)
+		{
+			if (!receipt.AllItemsVerified)
+			{
+				continue;
+			}
+
+			if (await IsReceiptTakenAsync(context, receipt.ReceiptId, txn.ProviderTransactionId, cancellationToken))
+			{
+				continue;
+			}
+
+			if (TryPossibleTip(receipt, txn, out decimal tip)
+				&& MatchWindow(receipt.Merchant, receipt.Date, txn) is int days)
+			{
+				tips.Add((receipt.ReceiptId, days, tip));
+			}
+		}
+
+		if (tips.Count == 0)
+		{
+			return new TillerMatchSuggestion(TillerMatchDecision.None, null, null, []);
+		}
+
+		if (tips.Count == 1)
+		{
+			List<TillerMatchCandidate> contenders =
+			[
+				new TillerMatchCandidate(tips[0].ReceiptId, txn.ProviderTransactionId, tips[0].Days),
+			];
+			contenders.AddRange(await MatchingTxnsAsync(context, tips[0].ReceiptId, cancellationToken));
+			contenders.AddRange(await OtherTipContendersAsync(context, tips[0].ReceiptId, txn.ProviderTransactionId, cancellationToken));
+			if (contenders.Count == 1)
+			{
+				return await WithConfidenceAsync(
+					new TillerMatchSuggestion(TillerMatchDecision.PossibleTip, tips[0].ReceiptId, null, [], tips[0].Tip),
+					txn,
+					tips[0].ReceiptId,
+					cancellationToken);
+			}
+
+			return new TillerMatchSuggestion(TillerMatchDecision.Ambiguous, null, null, contenders);
+		}
+
+		return new TillerMatchSuggestion(
+			TillerMatchDecision.Ambiguous,
+			null,
+			null,
+			[.. tips.Select(t => new TillerMatchCandidate(t.ReceiptId, txn.ProviderTransactionId, t.Days))]);
+	}
+
+	// Other settled charges that read as a tip on the same receipt contest
+	// the suggestion. Rows already linked elsewhere cannot contest: they
+	// have a receipt.
+	private async Task<List<TillerMatchCandidate>> OtherTipContendersAsync(
+		ApplicationDbContext context,
+		Guid receiptId,
+		string exceptTxn,
+		CancellationToken cancellationToken)
+	{
+		TillerReceiptSnapshot? receipt = await receiptCatalog.GetReceiptSnapshotAsync(receiptId, cancellationToken);
+		if (receipt is null)
+		{
+			return [];
+		}
+
+		List<TillerTransactionEntity> txns = await context.Set<TillerTransactionEntity>()
+			.AsNoTracking()
+			.Where(e => e.SupersededBy == null && e.ProviderTransactionId != exceptTxn)
+			.ToListAsync(cancellationToken);
+
+		List<TillerMatchCandidate> contenders = [];
+		foreach (TillerTransactionEntity other in txns)
+		{
+			if (!TryPossibleTip(receipt, other, out _))
+			{
+				continue;
+			}
+
+			if (await HasActiveLinkAsync(context, other.ProviderTransactionId, cancellationToken))
+			{
+				continue;
+			}
+
+			if (MatchWindow(receipt.Merchant, receipt.Date, other) is int days)
+			{
+				contenders.Add(new TillerMatchCandidate(receiptId, other.ProviderTransactionId, days));
+			}
+		}
+
+		return contenders;
 	}
 
 	private static async Task<bool> IsReceiptTakenAsync(

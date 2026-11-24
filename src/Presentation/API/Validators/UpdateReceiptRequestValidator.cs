@@ -1,5 +1,6 @@
 using API.Generated.Dtos;
 using Application.Validation;
+using Domain.Core;
 using FluentValidation;
 
 namespace API.Validators;
@@ -23,5 +24,9 @@ public class UpdateReceiptRequestValidator : AbstractValidator<UpdateReceiptRequ
 		RuleFor(x => x.Date)
 			.Must(datePolicy.IsNotFuture)
 			.WithMessage(DateMustBePriorToCurrentDate);
+
+		RuleFor(x => x.SourceKind)
+			.Must(kind => kind is null || Receipt.AdmittedSourceKinds.Contains(kind))
+			.WithMessage(Receipt.SourceKindNotAdmitted);
 	}
 }

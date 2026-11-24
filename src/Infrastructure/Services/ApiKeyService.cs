@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Application.Interfaces.Services;
+using Common;
 using Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,10 +9,15 @@ namespace Infrastructure.Services;
 
 public class ApiKeyService(IDbContextFactory<ApplicationDbContext> dbContextFactory) : IApiKeyService
 {
-	public async Task<CreateApiKeyResult> CreateApiKeyAsync(string userId, string name, DateTimeOffset? expiresAt, bool bypassRateLimit = false, CancellationToken cancellationToken = default)
+	public async Task<CreateApiKeyResult> CreateApiKeyAsync(string userId, string name, DateTimeOffset? expiresAt, bool bypassRateLimit = false, IReadOnlyList<string>? scopes = null, CancellationToken cancellationToken = default)
 	{
 		string rawKey = GenerateRawKey();
 		string keyHash = HashKey(rawKey);
+		string? canonicalScopes = scopes is null ? null : ApiKeyScopes.Canonicalize(scopes);
+		if (scopes is not null && string.IsNullOrEmpty(canonicalScopes))
+		{
+			throw new ArgumentException("At least one admitted scope is required.", nameof(scopes));
+		}
 
 		await using ApplicationDbContext context = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 		ApiKeyEntity entity = new()
@@ -24,6 +30,7 @@ public class ApiKeyService(IDbContextFactory<ApplicationDbContext> dbContextFact
 			ExpiresAt = expiresAt,
 			IsRevoked = false,
 			BypassRateLimit = bypassRateLimit,
+			Scopes = canonicalScopes,
 		};
 
 		context.ApiKeys.Add(entity);
@@ -34,10 +41,12 @@ public class ApiKeyService(IDbContextFactory<ApplicationDbContext> dbContextFact
 	public async Task<IReadOnlyList<ApiKeyInfo>> GetApiKeysForUserAsync(string userId, CancellationToken cancellationToken = default)
 	{
 		await using ApplicationDbContext context = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-		return await context.ApiKeys
+		return (await context.ApiKeys
 			.Where(k => k.UserId == userId && !k.IsRevoked)
-			.Select(k => new ApiKeyInfo(k.Id, k.Name, k.CreatedAt, k.LastUsedAt, k.ExpiresAt, k.IsRevoked, k.BypassRateLimit))
-			.ToListAsync(cancellationToken);
+			.Select(k => new { k.Id, k.Name, k.CreatedAt, k.LastUsedAt, k.ExpiresAt, k.IsRevoked, k.BypassRateLimit, k.Scopes })
+			.ToListAsync(cancellationToken))
+			.Select(k => new ApiKeyInfo(k.Id, k.Name, k.CreatedAt, k.LastUsedAt, k.ExpiresAt, k.IsRevoked, k.BypassRateLimit, ApiKeyScopes.Parse(k.Scopes)))
+			.ToList();
 	}
 
 	public async Task RevokeApiKeyAsync(Guid id, string userId, CancellationToken cancellationToken = default)
@@ -129,7 +138,7 @@ public class ApiKeyService(IDbContextFactory<ApplicationDbContext> dbContextFact
 			}
 		}
 
-		return new ApiKeyValidationResult(key.UserId, key.Id, key.BypassRateLimit);
+		return new ApiKeyValidationResult(key.UserId, key.Id, key.BypassRateLimit, ApiKeyScopes.Parse(key.Scopes));
 	}
 
 	private static string GenerateRawKey()

@@ -8,6 +8,7 @@ public enum TillerMatchDecision
 	Ambiguous,
 	Taken,
 	None,
+	PossibleTip,
 }
 
 public sealed record TillerMatchCandidate(
@@ -19,7 +20,8 @@ public sealed record TillerMatchSuggestion(
 	TillerMatchDecision Decision,
 	Guid? ReceiptId,
 	string? Confidence,
-	IReadOnlyList<TillerMatchCandidate> Candidates);
+	IReadOnlyList<TillerMatchCandidate> Candidates,
+	decimal? SuggestedTip = null);
 
 public sealed record TillerLinkHistoryEntry(
 	string Action,

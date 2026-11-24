@@ -54,4 +54,5 @@ public sealed record TillerTransactionQuery(
 
 public sealed record TillerTransactionPage(
 	IReadOnlyList<TillerTransactionRow> Rows,
-	bool Truncated);
+	bool Truncated,
+	int? TotalAvailable = null);

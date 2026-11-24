@@ -31,6 +31,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" PrivateAssets="all" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="Mediator.Abstractions" />
     <PackageReference Include="NJsonSchema" />
@@ -75,8 +76,7 @@
   <!-- 1. Build tool + check hash -->
   <Target Name="CheckDtoFreshness">
     <Exec Command="dotnet build &quot;$(_DtoSplitterProject)&quot; -c Release" />
-    <Exec Command="&quot;$(_DtoSplitterExe)&quot; check &quot;$(_SpecPath)&quot; &quot;$(_GeneratedDir)&quot;"
-          IgnoreExitCode="true">
+    <Exec Command="&quot;$(_DtoSplitterExe)&quot; check &quot;$(_SpecPath)&quot; &quot;$(_GeneratedDir)&quot;" IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_DtoCheckResult" />
     </Exec>
   </Target>
@@ -98,8 +98,7 @@
        that point (e.g. on a fresh CI checkout where they're gitignored) would otherwise
        be invisible to the compiler. Remove+Include is idempotent: safe whether files
        were already globbed or are brand-new. -->
-  <Target Name="GenerateDtos" BeforeTargets="CoreCompile"
-          DependsOnTargets="CheckDtoFreshness;NSwagGenerate;SplitDtos">
+  <Target Name="GenerateDtos" BeforeTargets="CoreCompile" DependsOnTargets="CheckDtoFreshness;NSwagGenerate;SplitDtos">
     <ItemGroup>
       <Compile Remove="Generated\*.g.cs" />
       <Compile Include="Generated\*.g.cs" />

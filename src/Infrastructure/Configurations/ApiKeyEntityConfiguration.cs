@@ -23,5 +23,8 @@ public class ApiKeyEntityConfiguration : IEntityTypeConfiguration<ApiKeyEntity>
 			.WithMany(u => u.ApiKeys)
 			.HasForeignKey(e => e.UserId)
 			.OnDelete(DeleteBehavior.Cascade);
+
+		builder.Property(e => e.Scopes)
+			.HasMaxLength(200);
 	}
 }
