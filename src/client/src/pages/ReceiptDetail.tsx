@@ -213,8 +213,8 @@ function ReceiptDetail() {
       {trip?.receipt?.receipt?.sourcePaperlessDocumentId != null && (
         <p className="text-xs text-muted-foreground">
           Source: Paperless document #
-          {trip.receipt.receipt.sourcePaperlessDocumentId} (originals remain
-          in Paperless; review and approval history stays there)
+          {trip.receipt.receipt.sourcePaperlessDocumentId} (purchase record
+          preserved independently; review and approval history stays in Paperless)
         </p>
       )}
 

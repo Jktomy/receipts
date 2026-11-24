@@ -40,6 +40,7 @@ type DraftSummary = {
   merchant?: string | null;
   date?: string | null;
   total?: string | null;
+  sourceStatus?: { status: string; checkedAt?: string } | null;
 };
 type DraftState = DraftSummary & { draft?: AtlasDraft; reason?: string };
 type MatchResult = {
@@ -286,6 +287,14 @@ export default function PaperlessInbox() {
                       #{row.paperlessId} · {row.date || "Date unknown"} · {row.total || "Total unknown"}
                     </span>
                     <span className="block text-xs">{row.status.replaceAll("_", " ")}</span>
+                    {row.sourceStatus && (
+                      <span className="block text-xs text-muted-foreground">
+                        Original: {row.sourceStatus.status === "AVAILABLE" ? "available in Paperless"
+                          : row.sourceStatus.status === "RETIRED" ? "retired from Paperless — purchase record preserved"
+                          : row.sourceStatus.status === "DENIED" ? "availability unknown (access denied)"
+                          : "availability unknown"}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}

@@ -28,7 +28,7 @@ const good = {
 };
 const config = {
   paperlessUrl: "https://paperless.test", paperlessInstance: "atlas-test",
-  paperlessToken: "paperless-secret", requiredTagId: 77, blockedTagIds: [5],
+  paperlessToken: "paperless-secret", requiredTagId: 77, blockedTagIds: [5], authorizedReleaserIds: [2],
   openLyricUrl: "https://oathgate.test/v1", openLyricModel: "Open_Lyric",
   openLyricToken: "llm-secret", receiptsUrl: "https://receipts.test",
   receiptsApiKey: "receipts-secret",
@@ -41,10 +41,15 @@ function json(data, status=200) {
 }
 function mock({ document = {}, draft = good, fireflyPages = null } = {}) {
   const calls = [];
-  let doc = { id: 44, tags: [77], modified: "2026-11-18T15:00:00Z", content: ocr, ...document };
+  let doc = { id: 44, tags: [77], modified: "2026-11-18T15:00:00Z", content: ocr, versions: [{ added: "2026-11-18T15:00:00Z" }], ...document };
   const fetcher = async (target, options = {}) => {
     const url = new URL(target); calls.push({ host: url.host, pathname: url.pathname, method: options.method, headers: options.headers, body: options.body });
-    if (url.host === "paperless.test") return json(doc);
+    if (url.host === "paperless.test") {
+      if (/\/api\/documents\/\d+\/history\/?$/.test(url.pathname)) {
+        return json([{ action: "update", tagsOp: "add", tagsObjects: [77], ts: "2026-11-18T15:00:01Z", actorId: 2 }]);
+      }
+      return json(doc);
+    }
     if (url.host === "oathgate.test") return json({ choices: [{message: {content: JSON.stringify(draft)}}] });
     if (url.host === "receipts.test") return json({ receipt: { id: "receipts-101" } });
     if (url.host === "firefly.test") {

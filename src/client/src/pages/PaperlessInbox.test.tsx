@@ -44,7 +44,7 @@ function draftPayload(rev: number, confirmed: string | null) {
   };
 }
 
-function installBridge(state: BridgeState, matchStatus = "UNMATCHED") {
+function installBridge(state: BridgeState, matchStatus = "UNMATCHED", sourceStatus?: { status: string } | null) {
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), { status });
   return vi
@@ -72,6 +72,7 @@ function installBridge(state: BridgeState, matchStatus = "UNMATCHED") {
                 total: "8.60",
                 draftRevision: state.rev,
                 confirmedFireflyTransactionId: state.confirmed,
+                ...(sourceStatus ? { sourceStatus } : {}),
               },
             ],
           });
@@ -146,6 +147,26 @@ describe("PaperlessInbox", () => {
     installBridge(state);
     await openDraft();
     expect(screen.getByText(/Draft revision 1/)).toBeInTheDocument();
+  });
+
+  it("shows retired-original badge when the source is retired", async () => {
+    const state: BridgeState = {
+      rev: 1, confirmed: null, lastPut: null, lastImport: null, lastConfirm: null,
+    };
+    installBridge(state, "UNMATCHED", { status: "RETIRED" });
+    renderWithProviders(<PaperlessInbox />);
+    await screen.findByRole("button", { name: /H-E-B/ });
+    expect(screen.getByText(/retired from Paperless/)).toBeInTheDocument();
+  });
+
+  it("shows available-original badge when the source is available", async () => {
+    const state: BridgeState = {
+      rev: 1, confirmed: null, lastPut: null, lastImport: null, lastConfirm: null,
+    };
+    installBridge(state, "UNMATCHED", { status: "AVAILABLE" });
+    renderWithProviders(<PaperlessInbox />);
+    await screen.findByRole("button", { name: /H-E-B/ });
+    expect(screen.getByText(/available in Paperless/)).toBeInTheDocument();
   });
 
   it("edits item units and sends them with corrections", async () => {

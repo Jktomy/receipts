@@ -1,5 +1,5 @@
 // W25 release gate — native Cadmus admission (synthetic fixtures only).
-// First extraction under a configured releaseTagId requires NATIVE tag-history
+// First extraction under the destination tag requires NATIVE tag-history
 // evidence: a 21-add at/after the current-version floor (file version +
 // document modified) by an authorized actor with no later removal (see
 // evaluateReleaseBinding). No caller-supplied observation is accepted
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
 
 const TRACER = 14;
-const RETAGGED = 21;
+const RETAGGED = 21; // native tag: present on docs, carries NO authority
 const REVIEWED = 16;
 const SHADOW_PROCESSED = 22;
 // Live-grounded protected exclusions per W27 read-only audit (workflow3):
@@ -22,7 +22,7 @@ const SHADOW_PROCESSED = 22;
 const BLOCKED = [17, 4, 18, 20];
 
 const MOD0 = "2026-11-23T22:00:00Z"; // doc modified + V0 added
-const ADD_AUTH = "2026-11-23T22:30:00Z"; // authorized 21-add covering V0
+const ADD_AUTH = "2026-11-23T22:30:00Z"; // distractor 21-add (never authorizes; see destination tests)
 const VB = "2026-11-23T23:00:00Z"; // changed-source version B added
 const T3 = "2026-11-23T23:30:00Z"; // fresh native re-release add
 
@@ -41,11 +41,12 @@ const good = {
   adjustments: []
 };
 // Native-shaped history entry: 21-add by actorId at ts (mirrors W27 adapter fixtures).
-const tagAdd = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [21], ts, actorId });
+const tagAdd = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [TRACER], ts, actorId });
+const tagAdd21 = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [RETAGGED], ts, actorId });
 const V0 = [{ added: MOD0, checksum: null }];
 const VBver = [{ added: VB, checksum: null }];
 
-function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth = [], historyPages = null } = {}) {
+function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth = [], historyPages = null, docGone = false } = {}) {
   let modelCalls = 0, aiCalls = 0, destCalls = 0, paperlessPosts = 0, historyCalls = 0;
   let docReads = 0;
   let liveTags = [...tags];
@@ -53,6 +54,7 @@ function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth
   let liveModified = MOD0;
   let liveVersions = V0.map((v) => ({ ...v }));
   let liveHistory = [];
+  let gone = docGone;
   const calls = [];
   const fetcher = async (target, options = {}) => {
     const url = new URL(target);
@@ -78,6 +80,7 @@ function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth
         return new Response(JSON.stringify(liveHistory), { status: 200 });
       }
       docReads++;
+      if (gone) return new Response(JSON.stringify({ detail: "Not found." }), { status: 404 });
       if (typeof contents === "function") {
         const r = contents(docReads);
         if (r) {
@@ -120,7 +123,7 @@ function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth
   };
   const config = {
     paperlessUrl: "https://paperless.test", paperlessInstance: "w25-test",
-    paperlessToken: "synthetic", requiredTagId: TRACER, releaseTagId: RETAGGED, blockedTagIds: BLOCKED,
+    paperlessToken: "synthetic", requiredTagId: TRACER, blockedTagIds: BLOCKED,
     openLyricUrl: "https://oathgate.test/v1", openLyricModel: "synth",
     openLyricToken: "synthetic", receiptsUrl: "https://receipts.test",
     receiptsApiKey: "synthetic", webhookSecret: "hook-w25", operatorSecret: "op-w25",
@@ -131,6 +134,7 @@ function harness({ tags = [TRACER, RETAGGED], ai = "done", contents = null, auth
   };
   const stats = () => ({ modelCalls, aiCalls, destCalls, paperlessPosts, historyCalls });
   const setLive = (t, c, o = {}) => {
+    if (o.gone !== undefined) gone = o.gone;
     if (t) liveTags = [...t];
     if (c !== undefined) liveContent = c;
     if (o.history) liveHistory = o.history;
@@ -184,44 +188,51 @@ async function live(h) {
   return { bridge, state, call, settle, close: () => server.close() };
 }
 
-test("invalid release tag id fails fast at startup (no silent misconfiguration)", async () => {
+test("missing destination tag id fails fast at startup (no silent misconfiguration)", async () => {
   const h = harness();
-  for (const bad of [0, -1, 1.5, NaN]) {
-    assert.throws(
-      () => createAtlasBridge({ ...h.config, releaseTagId: bad }, { fetcher: h.fetcher, dataDir: mkdtempSync(join(tmpdir(), "w25-bad-")) }),
-      /releaseTagId|release/i
-    );
-  }
+  delete h.config.requiredTagId;
+  assert.throws(
+    () => createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir: mkdtempSync(join(tmpdir(), "w25-bad-")) }),
+    /Paperless configuration required/i
+  );
 });
 
-test("strict without a configured release tag keeps legacy contract behavior (live config must set it)", async () => {
-  const h = harness({ tags: [TRACER] });
-  delete h.config.releaseTagId;
+test("destination tag without authorized history add is held pre-model", async () => {
+  const h = harness({ tags: [TRACER], auth: [2] });
   const { state } = await drive(h);
-  assert.equal(state.status, "READY_FOR_REVIEW");
+  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("Tracer14 WITHOUT ReTagged21 is held: zero model and zero destination calls", async () => {
+test("destination drafts WITHOUT stale release tag: zero model and zero destination calls", async () => {
   const h = harness({ tags: [TRACER], auth: [2] });
   h.setLive([TRACER], undefined, { history: [tagAdd(ADD_AUTH)] });
   const { state } = await drive(h);
-  assert.equal(state.status, "REVIEW_REQUIRED");
-  assert.match(state.reason ?? "", /release|ReTagged|21/i);
-  assert.equal(h.stats().modelCalls, 0);
+  assert.equal(state.status, "READY_FOR_REVIEW");
+  assert.equal(h.stats().modelCalls, 1);
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("Reviewed16/ShadowProcessed22 WITHOUT ReTagged21 is NOT release", async () => {
-  const h = harness({ tags: [TRACER, REVIEWED, SHADOW_PROCESSED], auth: [2] });
-  h.setLive([TRACER, REVIEWED, SHADOW_PROCESSED], undefined, { history: [tagAdd(ADD_AUTH)] });
+test("stale ID21 add alone never authorizes extraction", async () => {
+  const h = harness({ tags: [TRACER, RETAGGED], auth: [2] });
+  h.setLive([TRACER, RETAGGED], undefined, { history: [tagAdd21(ADD_AUTH)] });
   const { state } = await drive(h);
-  assert.equal(state.status, "REVIEW_REQUIRED");
+  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("native authorized 21-add at/after the version floor drafts (positive regime)", async () => {
+test("Reviewed16/ShadowProcessed22 are not release authority: destination history still required", async () => {
+  const h = harness({ tags: [TRACER, REVIEWED, SHADOW_PROCESSED], auth: [2] });
+  h.setLive([TRACER, REVIEWED, SHADOW_PROCESSED]);
+  const { state } = await drive(h);
+  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(h.stats().modelCalls, 0);
+  assert.equal(h.stats().destCalls, 0);
+});
+
+test("native authorized destination-add at/after the version floor drafts (positive regime)", async () => {
   const h = harness({ auth: [2] });
   h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
   const { state } = await drive(h);
@@ -236,9 +247,9 @@ test("native authorized 21-add at/after the version floor drafts (positive regim
 
 test("forged callback tags are ignored: server re-fetch governs, zero model calls", async () => {
   const h = harness({ tags: [TRACER], auth: [2] });
-  h.setLive([TRACER], undefined, { history: [tagAdd(ADD_AUTH)] });
+  h.setLive([TRACER], undefined, { history: [tagAdd21(ADD_AUTH)] });
   const { state } = await drive(h, 9501, { sourceId: 9501, tags: [TRACER, RETAGGED] });
-  assert.equal(state.status, "REVIEW_REQUIRED");
+  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
@@ -304,7 +315,23 @@ test("stale-version release is blocked at import: zero destination calls", async
   assert.equal(bridge.state(9501).status, "SOURCE_CHANGED_REVIEW");
 });
 
-test("release revoked with UNCHANGED ocr still blocks import: zero destination calls", async () => {
+test("retired source blocks import: zero destination calls, draft held for reprocess", async () => {
+  const h = harness({ auth: [2] });
+  h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
+  const dataDir = mkdtempSync(join(tmpdir(), "w25-retired-"));
+  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
+  await bridge.processDocument(9501);
+  const ready = bridge.state(9501);
+  assert.equal(ready.status, "READY_FOR_REVIEW");
+  const rev = ready.draftRevision;
+  h.setLive(undefined, undefined, { gone: true });
+  const res = await bridge.importReviewed(9501, rev);
+  assert.equal(res.status, 409);
+  assert.equal(h.stats().destCalls, 0);
+  assert.equal(bridge.state(9501).status, "SOURCE_CHANGED_REVIEW");
+});
+
+test("destination revoked with UNCHANGED ocr still blocks import: zero destination calls", async () => {
   const h = harness({ auth: [2] });
   h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
   const dataDir = mkdtempSync(join(tmpdir(), "w25-revoke-"));
@@ -313,11 +340,47 @@ test("release revoked with UNCHANGED ocr still blocks import: zero destination c
   const ready = bridge.state(9501);
   assert.equal(ready.status, "READY_FOR_REVIEW");
   const rev = ready.draftRevision;
-  h.setLive([TRACER]);
+  h.setLive([]);
   const res = await bridge.importReviewed(9501, rev);
   assert.equal(res.status, 409);
   assert.equal(h.stats().destCalls, 0);
   assert.equal(bridge.state(9501).status, "SOURCE_CHANGED_REVIEW");
+});
+
+test("retired replay returns the existing receipt with no new destination call", async () => {
+  const h = harness({ auth: [2] });
+  h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
+  const dataDir = mkdtempSync(join(tmpdir(), "w25-retiredreplay-"));
+  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
+  await bridge.processDocument(9501);
+  const ready = bridge.state(9501);
+  assert.equal(ready.status, "READY_FOR_REVIEW");
+  const r1 = await bridge.importReviewed(9501, ready.draftRevision);
+  assert.equal(r1.status, 200);
+  const callsBefore = h.stats().destCalls;
+  assert.equal(callsBefore, 1);
+  h.setLive(undefined, undefined, { gone: true });
+  const r2 = await bridge.importReviewed(9501, ready.draftRevision);
+  assert.equal(r2.status, 200);
+  assert.equal(r2.result.receiptId, r1.result.receiptId);
+  assert.equal(h.stats().destCalls, 1);
+});
+
+test("reviewer correction saves after source retirement: no new admission", async () => {
+  const h = harness({ auth: [2] });
+  h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
+  const { bridge, state, call, settle, close } = await live(h);
+  try {
+    const s1 = await settle();
+    assert.equal(s1.status, "READY_FOR_REVIEW");
+    h.setLive(undefined, undefined, { gone: true });
+    const put = await call("PUT", "/drafts/9501", { ...good, merchant: "SYNTH MART Plus", expectedRevision: s1.draftRevision }, "op");
+    assert.equal(put.status, 200);
+    const saved = state(9501);
+    assert.equal(saved.merchant, undefined);
+    assert.equal(saved.draft.merchant, "SYNTH MART Plus");
+    assert.equal(saved.status, "READY_FOR_REVIEW");
+  } finally { close(); }
 });
 
 test("duplicate/retry delivery converges: one model call, one draft revision", async () => {

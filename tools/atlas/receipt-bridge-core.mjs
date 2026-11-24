@@ -307,11 +307,14 @@ export function authorizeImport(qualified, attestation, context = {}) {
  * import for the CURRENT source revision. Pure function over native-shaped
  * inputs; every unproven input fails closed (deny).
  *
- * Adapter rule (W27 native-evidence handoff, W27-QA refinement): allow iff
- *  1. current tags contain the required tag and ReTagged21 (fresh re-read);
+ * Adapter rule (destination-tag sole release signal; two-tag rule retired):
+ * allow iff
+ *  1. current tags contain the destination tag (fresh re-read); ID21 and any
+ *     other stale/alternate tag neither help nor hinder this check;
  *  2. no blocked tag present;
- *  3. a history 21-add has ts STRICTLY after max(currentVersion.added, latestAuditedContentChange[, ocrSettledAt]);
- *  4. no history 21-remove at/after the authorizing add;
+ *  3. a history destination-add has ts STRICTLY after max(currentVersion.added,
+ *     latestAuditedContentChange[, ocrSettledAt]);
+ *  4. no history destination-remove at/after the authorizing add;
  *  5. the add actor is in authorizedReleasers (EMPTY under R20 HOLD: deny-all).
  *
  * Version floor notes (do not weaken): versions[] covers FILE versions, not
@@ -333,13 +336,16 @@ export function authorizeImport(qualified, attestation, context = {}) {
 export function evaluateReleaseBinding({ currentTags, history, versions, bridgeContentHash, authorizedReleasers, ocrSettledAt = null, requiredTagId = null, blockedTagIds = [] }) {
   const deny = (reason) => ({ allow: false, reason });
   const num = (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : null; };
-  const has21 = (objects) => (Array.isArray(objects) ? objects : []).some((o) => num(o) === 21 || String(o ?? "").toLowerCase() === "retagged");
+  // Sole release signal: the destination tag (e.g. Tracer), assigned only by an
+  // authorized Shadow/human after review. No separate release tag exists; stale
+  // tags (ReTagged/Shadow Route or any other name) never authorize. History is
+  // matched by stable numeric tag id only — display names are not authority.
+  const destId = Number(requiredTagId);
+  const hasDestination = (objects) => Number.isSafeInteger(destId) && destId >= 1 && (Array.isArray(objects) ? objects : []).some((o) => num(o) === destId);
   const rawTags = Array.isArray(currentTags) ? currentTags : [];
   const tags = rawTags.map(num);
-  if (requiredTagId !== null && requiredTagId !== undefined && !tags.includes(Number(requiredTagId))) {
-    return deny("required receipt tag absent on current tags");
-  }
-  if (!has21(rawTags)) return deny("ReTagged21 absent on current tags");
+  if (!Number.isSafeInteger(destId) || destId < 1) return deny("destination tag unconfigured: no release authority");
+  if (!hasDestination(rawTags)) return deny("destination release tag absent on current tags");
   const blocked = new Set((blockedTagIds ?? []).map(num).filter((n) => n !== null));
   if (tags.some((t) => t !== null && blocked.has(t))) return deny("document has an excluded sensitive tag");
   if (!Array.isArray(history)) return deny("native tag history unavailable");
@@ -406,21 +412,21 @@ export function evaluateReleaseBinding({ currentTags, history, versions, bridgeC
   };
   const parsed = history.map((e, i) => ({ ...norm(e), action: e?.action ?? null, index: i }));
   if (parsed.some((n) => n.unparseable && n.touchesTags)) {
-    return deny("uninterpretable tag history entry (cannot exclude a 21 removal)");
+    return deny("uninterpretable tag history entry (cannot exclude a destination-tag removal)");
   }
   const adds = parsed.filter((n) =>
-    !n.unparseable && n.action === "update" && n.op === "add" && has21(n.objects));
+    !n.unparseable && n.action === "update" && n.op === "add" && hasDestination(n.objects));
   // Strictly after: an add at the same instant as the floor cannot be ordered
   // after it, so it authorizes nothing. No rounding of earlier into equal.
   const bound = adds.filter((n) => n.ts > floor && auth.has(n.actor));
-  if (bound.length === 0) return deny("no authorized 21-add after release floor");
+  if (bound.length === 0) return deny("no authorized destination add after release floor");
   const latestBoundTs = Math.max(...bound.map((n) => n.ts));
   // Same-instant removal denies too: without strict ordering after the add,
   // continued authorization cannot be established.
   const removed = parsed.some((n) =>
-    !n.unparseable && n.action === "update" && n.op === "remove" && has21(n.objects) && n.ts >= latestBoundTs);
-  if (removed) return deny("21 removed at/after authorizing add");
-  return { allow: true, reason: "authorized 21-add covers current version", floor, versionAdded, qualifyingAdds: bound.length };
+    !n.unparseable && n.action === "update" && n.op === "remove" && hasDestination(n.objects) && n.ts >= latestBoundTs);
+  if (removed) return deny("destination removed at/after authorizing add");
+  return { allow: true, reason: "authorized destination add covers current version", floor, versionAdded, qualifyingAdds: bound.length };
 }
 
 export function stableSourceRequestId(instance, paperlessId) {
@@ -512,22 +518,74 @@ export async function getPaperlessText(fetcher, config, rawDocumentId) {
   if (Number(d?.id) !== documentId) throw new Error("Paperless returned unexpected document ID");
   const tags = Array.isArray(d.tags) ? d.tags.map(Number) : d.tags;
   if (!Array.isArray(tags) || !tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
-  // Separate release authority: the required tag marks a candidate, but
-  // intake/model work additionally requires the separately authorized release
-  // tag (ReTagged21) on the CURRENT document version. AIReviewed16 /
-  // ShadowProcessed22 alone never satisfy this. When releaseTagId is
-  // unconfigured the bridge keeps legacy contract-test behavior; live
-  // activation must set ATLAS_PAPERLESS_RELEASE_TAG_ID (W20 config).
-  if (config.releaseTagId !== undefined && config.releaseTagId !== null) {
-    if (!Number.isSafeInteger(Number(config.releaseTagId)) || Number(config.releaseTagId) < 1) throw new Error("Invalid release tag configuration");
-    if (!tags.includes(Number(config.releaseTagId))) throw new Error("Release tag absent: document is not authorized for intake (ReTagged required)");
-  }
+  // Sole release signal: the destination tag (requiredTagId), assigned only by
+  // an authorized Shadow/human after review. No separate release tag exists.
+  // AIReviewed16/ShadowProcessed22 alone never satisfy this. config.releaseTagId,
+  // when present, is ignored; native ID21 carries no authority.
   if (tags.some(tag => (config.blockedTagIds ?? []).map(Number).includes(tag))) throw new Error("Document has an excluded sensitive tag");
   if (typeof d.content !== "string" || d.content.trim().length < 20) throw new Error("Document OCR content is not ready");
   if (d.content.length > 100000) throw new Error("OCR text exceeds input limit");
   // versions[] rides through raw when present (native retrieve shape); the
   // release predicate validates it strictly and treats absence as unproven.
   return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex"), tags, versions: Array.isArray(d.versions) ? d.versions : null };
+}
+
+// Source availability probe — three positive tiers plus fail-closed unknown.
+// AVAILABLE: current authorized fetch proves the exact document now.
+// RETIRED: the id appears in the native Trash listing with deleted_at (positive
+//   evidence; requires config.paperlessTrashPath, verified native contract).
+//   A bare 404 is NEVER retirement: it may be permissions, misconfiguration,
+//   hard deletion, or a wrong id.
+// DENIED: 401/403 — availability unknowable, never false-retired.
+// UNKNOWN: network failure, unexpected shape, or 404 without trash evidence.
+// No OCR/tag/protected content is read here; trash pages are scanned for the
+// id only and bodies are dropped.
+export async function probeSourceStatus(fetcher, config, rawDocumentId) {
+  const documentId = Number(rawDocumentId);
+  if (!Number.isSafeInteger(documentId) || documentId < 1) return { status: "UNKNOWN", detail: "invalid id" };
+  let response;
+  try {
+    response = await fetcher(apiUrl(config.paperlessUrl, "/api/documents/" + documentId + "/"), {
+      method: "GET", headers: { Authorization: "Token " + config.paperlessToken, Accept: "application/json" },
+      redirect: "error", signal: AbortSignal.timeout(15000)
+    });
+  } catch (error) {
+    return { status: "UNKNOWN", detail: "fetch failed" };
+  }
+  if (response.ok) {
+    let d = null;
+    try { d = await response.json(); } catch { d = null; }
+    if (Number(d?.id) === documentId) return { status: "AVAILABLE", detail: "current authorized retrieve" };
+    return { status: "UNKNOWN", detail: "unexpected retrieve shape" };
+  }
+  if (response.status === 401 || response.status === 403) return { status: "DENIED", detail: "HTTP " + response.status };
+  if (response.status !== 404 || !config.paperlessTrashPath) {
+    return { status: "UNKNOWN", detail: "HTTP " + response.status + " without trash evidence" };
+  }
+  try {
+    let url = apiUrl(config.paperlessUrl, config.paperlessTrashPath);
+    for (let page = 0; page < 5 && url; page++) {
+      const tr = await fetcher(url, {
+        method: "GET", headers: { Authorization: "Token " + config.paperlessToken, Accept: "application/json" },
+        redirect: "error", signal: AbortSignal.timeout(15000)
+      });
+      if (!tr.ok) return { status: "UNKNOWN", detail: "trash list HTTP " + tr.status };
+      const body = await tr.json();
+      const results = Array.isArray(body) ? body : body.results;
+      if (!Array.isArray(results)) return { status: "UNKNOWN", detail: "unexpected trash shape" };
+      for (const row of results) {
+        if (Number(row?.id) === documentId) {
+          if (row?.deleted_at) return { status: "RETIRED", detail: "trash deleted_at present" };
+          return { status: "UNKNOWN", detail: "trash row without deleted_at" };
+        }
+      }
+      const next = !Array.isArray(body) ? body.next : null;
+      url = typeof next === "string" && next ? next : null;
+    }
+  } catch (error) {
+    return { status: "UNKNOWN", detail: "trash check failed" };
+  }
+  return { status: "UNKNOWN", detail: "absent without trash evidence" };
 }
 
 export function classifyRoutes(rawTags, config) {

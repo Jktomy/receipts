@@ -1,6 +1,6 @@
 // W20 C3 composition test — native AI queued-count cross-case (P4 guard port).
 // Shape: Paperless-AI status {queued:1, current:[]} with an otherwise fully
-// authorized v7 release (tags [14,21], authorized history add, settled OCR).
+// authorized v7 destination release (tags [14,21], authorized 14-add, settled OCR).
 // RED on v7 head: finalization wrongly READY + 1 model call (fail-open).
 // GREEN with the ported P4 guard: REVIEW_REQUIRED naming queued/AI, 0 model
 // calls, 0 destination calls. Synthetic only; no live access.
@@ -24,7 +24,7 @@ const good = {
   items: [{ description: "Milk", evidence: "MILK 1 3.99", quantity: "1", unitPrice: "3.99", total: "3.99" }],
   adjustments: []
 };
-const tagAdd = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [21], ts, actorId });
+const tagAdd = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [TRACER], ts, actorId });
 
 function harness() {
   let modelCalls = 0, destCalls = 0, paperlessPosts = 0;
@@ -36,7 +36,7 @@ function harness() {
         return new Response(JSON.stringify({ count: 0, next: null, previous: null, results: [] }), { status: 200 });
       }
       if (/\/api\/documents\/\d+\/history\/?$/.test(url.pathname)) {
-        return new Response(JSON.stringify([{ action: "update", tagsOp: "add", tagsObjects: [21], ts: ADD_AUTH, actorId: 2 }]), { status: 200 });
+        return new Response(JSON.stringify([{ action: "update", tagsOp: "add", tagsObjects: [TRACER], ts: ADD_AUTH, actorId: 2 }]), { status: 200 });
       }
       return new Response(JSON.stringify(
         { id: 9501, tags: [TRACER, RETAGGED], modified: MOD0, content: ocr, versions: [{ added: MOD0, checksum: null }] }), { status: 200 });
@@ -66,7 +66,7 @@ function harness() {
   };
   const config = {
     paperlessUrl: "https://paperless.test", paperlessInstance: "w20-c3",
-    paperlessToken: "synthetic", requiredTagId: TRACER, releaseTagId: RETAGGED, blockedTagIds: BLOCKED,
+    paperlessToken: "synthetic", requiredTagId: TRACER, blockedTagIds: BLOCKED,
     openLyricUrl: "https://oathgate.test/v1", openLyricModel: "synth",
     openLyricToken: "synthetic", receiptsUrl: "https://receipts.test",
     receiptsApiKey: "synthetic", webhookSecret: "hook-w20", operatorSecret: "op-w20",
