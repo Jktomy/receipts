@@ -1,4 +1,3 @@
-using Common;
 using System.Security.Claims;
 using API.Authentication;
 using API.Generated.Dtos;
@@ -17,6 +16,7 @@ using Application.Queries.Core.ReceiptItem;
 using Application.Queries.Core.ReceiptItem.GetReceiptItemSuggestions;
 using Application.Queries.Core.Ynab;
 using Asp.Versioning;
+using Common;
 using Domain.Core;
 using Mediator;
 using Microsoft.AspNetCore.Authorization;

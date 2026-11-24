@@ -91,6 +91,7 @@ const receipt = {
   location: "Shop",
   date: "2026-01-01",
   taxAmount: 0,
+  taxUnknown: false,
 };
 const item = {
   id: "item",

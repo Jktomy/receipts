@@ -267,6 +267,7 @@ export default function NewReceiptPage() {
           location: headerValues.location,
           date: headerValues.date,
           taxAmount: headerValues.taxAmount,
+          taxUnknown: false,
           paidFromEnvelopeId,
           occasionId,
         },

@@ -39,6 +39,7 @@ const receipt = {
   location: 'Café "North"',
   date: "2026-01-02",
   taxAmount: 1.23,
+  taxUnknown: false,
 };
 
 function sendJson(response: ServerResponse, status: number, body: unknown) {

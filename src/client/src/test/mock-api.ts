@@ -153,6 +153,7 @@ export function mockReceiptResponse(
     location: "Test Store",
     date: "2025-01-15",
     taxAmount: 5.0,
+    taxUnknown: false,
     ...overrides,
   };
 }

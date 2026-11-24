@@ -66,7 +66,7 @@ describe("useReceipts", () => {
     });
 
     await result.current.mutateAsync({
-      receipt: { location: "Store", date: "2026-08-31", taxAmount: 0 },
+      receipt: { location: "Store", date: "2026-08-31", taxAmount: 0, taxUnknown: false },
       transactions: [],
       items: [],
       adjustments: [],
@@ -123,6 +123,7 @@ describe("useReceipts", () => {
       location: "Target",
       date: "2025-02-01",
       taxAmount: 3.5,
+      taxUnknown: false,
       description: null,
     };
     const created = { id: "2", ...newReceipt };
@@ -144,6 +145,7 @@ describe("useReceipts", () => {
       location: "Walmart Updated",
       date: "2025-01-02",
       taxAmount: 6.0,
+      taxUnknown: false,
     };
     (client.PUT as Mock).mockResolvedValue({ error: undefined });
 
@@ -302,7 +304,7 @@ describe("useReceipts", () => {
       wrapper: createWrapper(),
     });
 
-    result.current.mutate({ location: "Store", date: "2025-01-01", taxAmount: 1.0 });
+    result.current.mutate({ location: "Store", date: "2025-01-01", taxAmount: 1.0, taxUnknown: false });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(toast.error).not.toHaveBeenCalled();
@@ -315,7 +317,7 @@ describe("useReceipts", () => {
       wrapper: createWrapper(),
     });
 
-    result.current.mutate({ id: "1", location: "Store", date: "2025-01-01", taxAmount: 1.0 });
+    result.current.mutate({ id: "1", location: "Store", date: "2025-01-01", taxAmount: 1.0, taxUnknown: false });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(toast.error).not.toHaveBeenCalled();

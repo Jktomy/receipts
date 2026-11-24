@@ -1,6 +1,6 @@
+using System.ComponentModel;
 using API.Mapping.Core;
 using API.Tiller;
-using ReceiptResponse = API.Generated.Dtos.ReceiptResponse;
 using Application.Commands.Receipt.CreateComplete;
 using Application.Commands.Receipt.Update;
 using Application.Commands.Tiller;
@@ -10,11 +10,11 @@ using Application.Models.Tiller;
 using Application.Queries.Core.Receipt;
 using Application.Queries.Core.ReceiptItem;
 using Application.Queries.Core.Tiller;
-using Domain.Core;
 using Domain;
+using Domain.Core;
 using Mediator;
 using ModelContextProtocol.Server;
-using System.ComponentModel;
+using ReceiptResponse = API.Generated.Dtos.ReceiptResponse;
 
 namespace API.Mcp;
 
@@ -35,7 +35,7 @@ public sealed class TracerMcpTools(
 	TillerMapper tillerMapper)
 {
 	[McpServerTool(Name = "receipts_list", Title = "List receipts")]
-		[Description("List receipts, newest first by default. Read-only.")]
+	[Description("List receipts, newest first by default. Read-only.")]
 	public async Task<PagedResult<ReceiptListItem>> ReceiptsListAsync(
 		[Description("Max rows (1-100).")] int limit = 25,
 		[Description("Zero-based offset.")] int offset = 0,
@@ -51,7 +51,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "receipts_get", Title = "Get receipt")]
-		[Description("Get one receipt header by id. Read-only. Throws when absent.")]
+	[Description("Get one receipt header by id. Read-only. Throws when absent.")]
 	public async Task<Receipt> ReceiptsGetAsync(
 		[Description("Receipt id.")] Guid id,
 		CancellationToken cancellationToken = default)
@@ -61,7 +61,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "receipt_items_by_receipt", Title = "List receipt items")]
-		[Description("List line items for one receipt. Read-only.")]
+	[Description("List line items for one receipt. Read-only.")]
 	public async Task<PagedResult<ReceiptItem>> ReceiptItemsByReceiptAsync(
 		[Description("Receipt id.")] Guid receiptId,
 		[Description("Max rows (1-200).")] int limit = 50,
@@ -76,7 +76,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "receipts_create", Title = "Create receipt draft")]
-		[Description("Create a receipt draft with line items. New items enter the human-review normalization flow; categories may be left empty. SourceKind is never asserted by the caller.")]
+	[Description("Create a receipt draft with line items. New items enter the human-review normalization flow; categories may be left empty. SourceKind is never asserted by the caller.")]
 	public async Task<ReceiptResponse> ReceiptsCreateAsync(
 		[Description("Store/location.")] string location,
 		[Description("Receipt date YYYY-MM-DD.")] string date,
@@ -138,7 +138,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "receipts_correct", Title = "Correct receipt")]
-		[Description("Correct location and/or tax on a receipt. Only supplied fields change; provenance and items are preserved.")]
+	[Description("Correct location and/or tax on a receipt. Only supplied fields change; provenance and items are preserved.")]
 	public async Task<bool> ReceiptsCorrectAsync(
 		[Description("Receipt id.")] Guid id,
 		[Description("Corrected store/location, or null to keep.")] string? location = null,
@@ -163,7 +163,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "tiller_transactions", Title = "Query Tiller transactions")]
-		[Description("Query synced Tiller transactions (local reads only, no source writes).")]
+	[Description("Query synced Tiller transactions (local reads only, no source writes).")]
 	public async Task<TillerTransactionListDto> TillerTransactionsAsync(
 		[Description("Max rows (1-100).")] int limit = 25,
 		[Description("Zero-based offset.")] int offset = 0,
@@ -180,7 +180,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "tiller_suggest", Title = "Suggest receipt match")]
-		[Description("Deterministic receipt-match suggestion for a transaction. Local reads only.")]
+	[Description("Deterministic receipt-match suggestion for a transaction. Local reads only.")]
 	public async Task<TillerMatchSuggestionDto> TillerSuggestAsync(
 		[Description("Provider transaction id.")] string providerTransactionId,
 		CancellationToken cancellationToken = default)
@@ -191,7 +191,7 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "tiller_confirm", Title = "Confirm receipt link")]
-		[Description("Confirm a receipt link for a transaction (human-approval equivalent). Records the MCP channel as reviewer.")]
+	[Description("Confirm a receipt link for a transaction (human-approval equivalent). Records the MCP channel as reviewer.")]
 	public async Task<TillerMatchSuggestionDto> TillerConfirmAsync(
 		[Description("Provider transaction id.")] string providerTransactionId,
 		[Description("Receipt id to link.")] Guid receiptId,

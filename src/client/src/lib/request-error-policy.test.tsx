@@ -164,7 +164,7 @@ it.each([400, 503])(
         mutationFn: async () => {
           const { data, error } = await client.POST("/api/receipts", {
             ...localErrorPolicy.request,
-            body: { location: "Draft", date: "2026-09-01", taxAmount: 0 },
+            body: { location: "Draft", date: "2026-09-01", taxAmount: 0, taxUnknown: false },
           });
           if (error) throw error;
           return data;
@@ -223,7 +223,7 @@ it("suppresses a superseded local mutation callback and cache feedback", async (
         mutationFn: async () => {
           const { data, error } = await client.POST("/api/receipts", {
             ...localErrorPolicy.request,
-            body: { location: "Alice draft", date: "2026-09-01", taxAmount: 0 },
+            body: { location: "Alice draft", date: "2026-09-01", taxAmount: 0, taxUnknown: false },
           });
           if (error) throw error;
           return data;

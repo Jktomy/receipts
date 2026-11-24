@@ -215,6 +215,7 @@ function ApiKeys() {
       const { data, error } = await client.POST("/api/apikeys", {
         body: {
           name: values.name,
+          scopes: [],
           expiresAt: values.expiresAt || undefined,
           bypassRateLimit: values.bypassRateLimit,
         },
