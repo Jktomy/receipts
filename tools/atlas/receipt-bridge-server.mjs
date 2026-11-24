@@ -7,7 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
   importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport,
-  verifyFinalOcr, evaluateReleaseBinding, fetchNativeHistory, classifyRoutes
+  verifyFinalOcr, evaluateReleaseBinding, fetchNativeHistory, classifyRoutes, probeSourceStatus
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -77,6 +77,19 @@ function safeJson(response, status, value) {
   });
   response.end(content);
 }
+async function markAvailable() { return { status: "AVAILABLE", checkedAt: new Date().toISOString() }; }
+async function classifySourceFailure(fetcher, config, id, error) {
+  const checkedAt = new Date().toISOString();
+  const msg = error instanceof Error ? error.message : String(error);
+  const m = /HTTP (\d{3})/.exec(msg);
+  const code = m ? Number(m[1]) : null;
+  if (code === 401 || code === 403) return { status: "DENIED", checkedAt };
+  if (code === 404 && config.paperlessTrashPath) {
+    const probe = await probeSourceStatus(fetcher, config, id);
+    return { status: probe.status, checkedAt };
+  }
+  return { status: "UNKNOWN", checkedAt };
+}
 async function jsonBody(request, max = 8000) {
   let text = "";
   for await (const chunk of request) {
@@ -98,14 +111,10 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
   if (config.finalizationMode !== undefined && !["off", "strict"].includes(config.finalizationMode)) {
     throw new Error("Unknown finalizationMode: " + String(config.finalizationMode));
   }
-  // Live activation sets releaseTagId to the separately authorized Paperless
-  // release tag (ReTagged21); when present, required-tag/AIReviewed16/
-  // ShadowProcessed22 presence alone cannot release. Legacy contract tests
-  // without releaseTagId keep their proven behavior; the production config
-  // delta (W20) must set ATLAS_PAPERLESS_RELEASE_TAG_ID.
-  if (config.releaseTagId !== undefined && config.releaseTagId !== null && (!Number.isSafeInteger(Number(config.releaseTagId)) || Number(config.releaseTagId) < 1 || Number(config.releaseTagId) > 2147483647)) {
-    throw new Error("Invalid releaseTagId: expected the separately authorized Paperless release tag ID");
-  }
+  // Destination tag (requiredTagId) is the sole release signal; no separate
+  // release tag exists. config.releaseTagId, when present, is ignored.
+  // Native ID21 (ReTagged) carries no authority; its retirement is a
+  // separate destructive approval outside this change.
   for (const [key, min] of [["finalizationMaxAttempts", 1], ["finalizationIntervalMs", 0], ["finalizationStableReads", 2]]) {
     const v = config[key];
     if (v !== undefined && (!Number.isSafeInteger(v) || v < min)) {
@@ -200,7 +209,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           // Source changed after import: force re-review and void the payment
           // confirmation, which described the pre-change source and draft.
           : { ...previous, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless OCR text changed after import: re-check before relying on the link", confirmedFireflyTransactionId: null, confirmedAt: null };
-        setState(dataDir, id, state);
+        setState(dataDir, id, { ...state, sourceStatus: markAvailable() });
         return;
       }
       if (previous?.draft && source.contentHash === previous.contentHash) {
@@ -212,7 +221,8 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           setState(dataDir, id, {
             ...previous,
             status: (previous.problems ?? []).length ? "REVIEW_REQUIRED" : "READY_FOR_REVIEW",
-            reason: undefined
+            reason: undefined,
+            sourceStatus: markAvailable()
           });
         }
         return;
@@ -226,6 +236,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           contentHash: source.contentHash,
           modified: source.modified,
           status: "SOURCE_CHANGED_REVIEW",
+          sourceStatus: markAvailable(),
           reason: "Paperless OCR text changed after review: saved corrections need re-check",
           confirmedFireflyTransactionId: null,
           confirmedAt: null
@@ -243,6 +254,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         setState(dataDir, id, {
           ...previous,
           status: "RELEASE_STALE_REVIEW",
+          sourceStatus: markAvailable(),
           reason: "Paperless source changed after release observation (prior " + String(previous.contentHash).slice(0, 12) + " now " + String(source.contentHash).slice(0, 12) + "): release does not transfer; no model call made",
           confirmedFireflyTransactionId: null,
           confirmedAt: null
@@ -250,13 +262,12 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         return;
       }
       // Admission for first extraction: when a separately authorized release
-      // tag is configured, native release binding gates extraction (the gate
+      // destination tag is configured, native release binding gates extraction (the gate
       // above is reachable only with no previously extracted revision:
       // same-hash re-fires return early, changed revisions are held above).
       // The admit callback runs after the finalization wait so the bound
       // revision is the proven one.
-      const needsBinding = config.releaseTagId !== undefined && config.releaseTagId !== null;
-      const gated = await runFinalizationGate(id, source, needsBinding ? (proven, gateEvidence) => admitRelease(id, proven, gateEvidence) : null);
+      const gated = await runFinalizationGate(id, source, (proven, gateEvidence) => admitRelease(id, proven, gateEvidence));
       if (!gated) return;
       const parsed = gated.parsed;
       // Qualify and store the PROVEN revision: the gate may have waited
@@ -268,6 +279,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       const routes = classifyRoutes(source.tags, config);
       const state = {
         paperlessId: id, contentHash: source.contentHash, modified: source.modified,
+        sourceStatus: markAvailable(),
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
         problems: qualified.problems, routes,
         // Native binding that admitted this extraction (floor + qualifying
@@ -290,9 +302,11 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       setState(dataDir, id, state);
     } catch (error) {
       const old = getState(dataDir, id);
+      const tier = await classifySourceFailure(fetcher, config, id, error);
       setState(dataDir, id, {
         ...(old ?? { paperlessId: id }),
         status: old?.receiptId ? "SOURCE_CHANGED_REVIEW" : "REVIEW_REQUIRED",
+        sourceStatus: tier,
         reason: error instanceof Error ? error.message.slice(0, 160) : "Processing failed"
       });
     } finally {
@@ -322,20 +336,20 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       try {
         current = await getPaperlessText(fetcher, config, id);
       } catch (error) {
-        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "Paperless source or release changed before import: reprocess before saving", confirmedFireflyTransactionId: null, confirmedAt: null });
+        const tier = await classifySourceFailure(fetcher, config, id, error);
+        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", sourceStatus: tier, reason: "Paperless source or release changed before import: reprocess before saving", confirmedFireflyTransactionId: null, confirmedAt: null });
         return { status: 409, result: { error: "Paperless source or release changed: reprocess before saving" } };
       }
       if (current.contentHash !== saved.contentHash) {
         // The checked source is gone: block the import and void any payment
         // confirmation checked against the old revision.
-        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", reason: "OCR revision changed before import", confirmedFireflyTransactionId: null, confirmedAt: null });
+        setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", sourceStatus: markAvailable(), reason: "OCR revision changed before import", confirmedFireflyTransactionId: null, confirmedAt: null });
         return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
       }
-      // Native release binding at import: the release tag alone (even still
-      // present) does not authorize this revision. Only enforced when release
-      // authority is configured; legacy paths are unchanged. Denial leaves the
+      // Native release binding at import: the destination tag alone (even
+      // still present) does not authorize this revision. Denial leaves the
       // draft intact for retry after native re-release; zero destination writes.
-      if (config.releaseTagId !== undefined && config.releaseTagId !== null) {
+      {
         let importHistory = null;
         try {
           importHistory = await fetchNativeHistory(fetcher, config, id);
@@ -382,7 +396,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           specialist = { dispatched: false, error: error?.message ?? String(error) };
         }
       }
-      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId, routes, specialist });
+      setState(dataDir, id, { ...saved, status: "IMPORTED", receiptId: result.receiptId, routes, specialist, sourceStatus: markAvailable() });
       return { status: 200, result: { status: "IMPORTED", receiptId: result.receiptId } };
     } finally {
       active.delete(id);
@@ -492,7 +506,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
           const state = getState(dataDir, id);
           return state && {
             paperlessId: id, status: state.status, modified: state.modified,
-            problems: state.problems ?? [], receiptId: state.receiptId ?? null,
+            problems: state.problems ?? [], receiptId: state.receiptId ?? null, sourceStatus: state.sourceStatus ?? null,
             routes: state.routes ?? [], specialist: state.specialist ?? null,
             draftRevision: state.draftRevision ?? null,
             confirmedFireflyTransactionId: state.confirmedFireflyTransactionId ?? null,
@@ -614,7 +628,7 @@ if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.arg
     paperlessUrl: process.env.ATLAS_PAPERLESS_URL,
     paperlessInstance: process.env.ATLAS_PAPERLESS_INSTANCE,
     requiredTagId: Number(process.env.ATLAS_PAPERLESS_RECEIPT_TAG_ID),
-    releaseTagId: process.env.ATLAS_PAPERLESS_RELEASE_TAG_ID ? Number(process.env.ATLAS_PAPERLESS_RELEASE_TAG_ID) : undefined,
+    releaseTagId: undefined, // retired: ignored; native ID21 retirement needs separate approval
     grocyTagId: process.env.ATLAS_PAPERLESS_GROCY_TAG_ID ? Number(process.env.ATLAS_PAPERLESS_GROCY_TAG_ID) : null,
     myGarageTagId: process.env.ATLAS_PAPERLESS_MYGARAGE_TAG_ID ? Number(process.env.ATLAS_PAPERLESS_MYGARAGE_TAG_ID) : null,
     blockedTagIds: String(process.env.ATLAS_PAPERLESS_BLOCKED_TAG_IDS ?? "").split(",").filter(Boolean).map(Number),

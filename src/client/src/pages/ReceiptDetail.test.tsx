@@ -253,6 +253,30 @@ describe("ReceiptDetail", () => {
     expect(screen.getByText(/Paperless document #44/)).toBeInTheDocument();
   });
 
+  it("states the purchase record is preserved independently of the original", async () => {
+    const { useTripByReceiptId } = await import("@/hooks/useTrips");
+    vi.mocked(useTripByReceiptId).mockReturnValue(
+      mockQueryResult({
+        data: {
+          ...MOCK_TRIP,
+          receipt: {
+            ...MOCK_TRIP.receipt,
+            receipt: {
+              ...MOCK_TRIP.receipt.receipt,
+              sourcePaperlessDocumentId: 44,
+            },
+          },
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    );
+
+    renderWithRoutes("/receipts/r1");
+    expect(screen.getByText(/purchase record/)).toBeInTheDocument();
+    expect(screen.queryByText(/originals remain/)).not.toBeInTheDocument();
+  });
+
   it("hides the source line for receipts without a Paperless import", async () => {
     const { useTripByReceiptId } = await import("@/hooks/useTrips");
     vi.mocked(useTripByReceiptId).mockReturnValue(

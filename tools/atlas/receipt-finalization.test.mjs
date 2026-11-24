@@ -33,10 +33,14 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
       if (url.pathname.startsWith("/api/tasks")) {
         return new Response(JSON.stringify({ count: 0, next: null, previous: null, results: [] }), { status: 200 });
       }
+      if (/\/api\/documents\/\d+\/history\/?$/.test(url.pathname)) {
+        return new Response(JSON.stringify(
+          [{ action: "update", tagsOp: "add", tagsObjects: [77], ts: "2026-11-20T22:00:01Z", actorId: 2 }]), { status: 200 });
+      }
       docReads++;
       if (flipContent) content = flipContent(docReads, content);
       return new Response(JSON.stringify(
-        { id: 9501, tags, modified: "2026-11-20T22:00:00Z", content }), { status: 200 });
+        { id: 9501, tags, modified: "2026-11-20T22:00:00Z", content, versions: [{ added: "2026-11-20T22:00:00Z" }] }), { status: 200 });
     }
     if (url.host === "oathgate.test") {
       modelCalls++;
@@ -81,7 +85,7 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
   };
   const config = {
     paperlessUrl: "https://paperless.test", paperlessInstance: "w21-test",
-    paperlessToken: "synthetic", requiredTagId: 77, blockedTagIds: [5],
+    paperlessToken: "synthetic", requiredTagId: 77, blockedTagIds: [5], authorizedReleaserIds: [2],
     openLyricUrl: "https://oathgate.test/v1", openLyricModel: "synth",
     openLyricToken: "synthetic", receiptsUrl: "https://receipts.test",
     receiptsApiKey: "synthetic", webhookSecret: "hook-w21", operatorSecret: "op-w21",
