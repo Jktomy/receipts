@@ -15,10 +15,10 @@ namespace Infrastructure.Tests.Services;
 
 // Transport boundary, verified against the ACTUALLY CONNECTED Executor
 // Tiller read interface (live handshake 2026-11-23, zero mutations). The
-// client may ONLY invoke the five budget-surface tool paths via read RPC
-// (POST transport) with the exact configured account envelope. There is no
-// update, delete, category-edit, holdings, balance-history, or refresh path
-// anywhere in this module.
+// client may ONLY invoke the five budget-surface tool paths via MCP
+// streamable-HTTP tools/call (POST {base}/mcp, Bearer from TILLER_TOKEN_FILE)
+// with the exact configured account envelope. There is no update, delete,
+// category-edit, holdings, balance-history, or refresh path anywhere here.
 public class TillerApiClientTests
 {
 	private sealed class SpyHandler : HttpMessageHandler
@@ -32,14 +32,21 @@ public class TillerApiClientTests
 		}
 
 		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-		{
-			string body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-			Calls.Add((request.Method, request.RequestUri?.AbsolutePath, body));
-			return new HttpResponseMessage(HttpStatusCode.OK)
 			{
-				Content = new StringContent(_payload, System.Text.Encoding.UTF8, "application/json"),
-			};
-		}
+				string body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+				Calls.Add((request.Method, request.RequestUri?.AbsolutePath, body));
+				string payload = body.Contains("\"method\":\"initialize\"")
+					? "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\"}}"
+					: body.Contains("\"method\":\"notifications/initialized\"")
+						? "{}"
+						: _payload.Contains("\"spreadsheets\"") || _payload.Contains("\"accounts\"") || _payload.Contains("\"transactions\"") || _payload == "{}"
+							? "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":" + System.Text.Json.JsonSerializer.Serialize(_payload) + "}]}}"
+							: _payload;
+				return new HttpResponseMessage(HttpStatusCode.OK)
+				{
+					Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
+				};
+			}
 	}
 
 	private static TillerApiClient CreateClient(
@@ -57,6 +64,9 @@ public class TillerApiClientTests
 		cache ??= new MemoryCache(new MemoryCacheOptions());
 
 		Dictionary<string, string?> configValues = new();
+		string tokenFile = Path.Combine(Path.GetTempPath(), $"tiller-old-{Guid.NewGuid():N}.txt");
+		File.WriteAllText(tokenFile, "synthetic-test-bearer-token");
+		configValues["TILLER_TOKEN_FILE"] = tokenFile;
 		if (baseUrl is not null)
 		{
 			configValues["TILLER_BASE_URL"] = baseUrl;
@@ -125,10 +135,13 @@ public class TillerApiClientTests
 		// Assert
 		sheets.Should().ContainSingle().Which.Should().Be(
 			new TillerSpreadsheet("sheet-1", "Household", true, true, 24));
-		spy.Calls.Should().HaveCount(1);
-		spy.Calls[0].Method.Should().Be(HttpMethod.Post);
-		spy.Calls[0].Path.Should().EndWith("tools.tiller.list_spreadsheets");
-		spy.Calls[0].Body.Should().Contain("\"accountId\":\"acc_test_tiller\"");
+		spy.Calls.Should().HaveCount(3, "initialize + notifications/initialized + tools/call");
+		spy.Calls[2].Method.Should().Be(HttpMethod.Post);
+		spy.Calls[2].Path.Should().Be("/mcp");
+		JsonDocument envelope = JsonDocument.Parse(spy.Calls[2].Body);
+		envelope.RootElement.GetProperty("method").GetString().Should().Be("tools/call");
+		envelope.RootElement.GetProperty("params").GetProperty("name").GetString().Should().Be("tools.tiller.list_spreadsheets");
+		envelope.RootElement.GetProperty("params").GetProperty("arguments").GetProperty("accountId").GetString().Should().Be("acc_test_tiller");
 	}
 
 	[Fact]
@@ -145,8 +158,11 @@ public class TillerApiClientTests
 		// Assert
 		accounts.Should().ContainSingle().Which.Should().Be(
 			new TillerAccount("acc-x1", "Rewards Checking", "Amex", "checking", "Asset"));
-		spy.Calls[0].Method.Should().Be(HttpMethod.Post);
-		spy.Calls[0].Path.Should().EndWith("tools.tiller.list_accounts");
+		spy.Calls.Should().HaveCount(3, "initialize + notifications/initialized + tools/call");
+		spy.Calls[2].Method.Should().Be(HttpMethod.Post);
+		spy.Calls[2].Path.Should().Be("/mcp");
+		JsonDocument accountEnvelope = JsonDocument.Parse(spy.Calls[2].Body);
+		accountEnvelope.RootElement.GetProperty("params").GetProperty("name").GetString().Should().Be("tools.tiller.list_accounts");
 	}
 
 	[Fact]
@@ -174,13 +190,15 @@ public class TillerApiClientTests
 		page.Rows.Should().ContainSingle().Which.TransactionId.Should().Be("t-1");
 		page.Rows[0].Status.Should().Be("posted", "status is absent from live columns and defaults to posted");
 		page.Truncated.Should().BeFalse("a short page marks the end of history");
-		spy.Calls.Should().HaveCount(1);
-		spy.Calls[0].Method.Should().Be(HttpMethod.Post);
-		spy.Calls[0].Path.Should().EndWith("tools.tiller.query_transactions");
-		JsonDocument body = JsonDocument.Parse(spy.Calls[0].Body);
-		body.RootElement.GetProperty("accountId").GetString().Should().Be("acc_test_tiller");
-		body.RootElement.GetProperty("input").GetProperty("spreadsheetId").GetString().Should().Be("sheet-1");
-		JsonElement query = body.RootElement.GetProperty("input").GetProperty("query");
+		spy.Calls.Should().HaveCount(3, "initialize + notifications/initialized + tools/call");
+		spy.Calls[2].Method.Should().Be(HttpMethod.Post);
+		spy.Calls[2].Path.Should().Be("/mcp");
+		JsonDocument body = JsonDocument.Parse(spy.Calls[2].Body);
+		body.RootElement.GetProperty("method").GetString().Should().Be("tools/call");
+		body.RootElement.GetProperty("params").GetProperty("name").GetString().Should().Be("tools.tiller.query_transactions");
+		body.RootElement.GetProperty("params").GetProperty("arguments").GetProperty("accountId").GetString().Should().Be("acc_test_tiller");
+		body.RootElement.GetProperty("params").GetProperty("arguments").GetProperty("input").GetProperty("spreadsheetId").GetString().Should().Be("sheet-1");
+		JsonElement query = body.RootElement.GetProperty("params").GetProperty("arguments").GetProperty("input").GetProperty("query");
 		query.GetProperty("filter").GetProperty("date").GetProperty("$gte").GetString().Should().Be("2026-11-01");
 		query.GetProperty("sort")[0].GetProperty("field").GetString().Should().Be("date");
 		query.GetProperty("sort")[0].GetProperty("direction").GetString().Should().Be("asc");

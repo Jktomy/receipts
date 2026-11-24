@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Application.Interfaces.Services;
@@ -9,10 +10,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-// Native read-only Tiller transport over the ACTUALLY CONNECTED Executor
-// Tiller read interface (verified live: list_spreadsheets, list_accounts,
-// list_categories, describe_sheet, query_transactions — read RPCs, POST
-// transport, exact account envelope).
+// Native read-only Tiller transport over MCP streamable-HTTP against the
+// admitted Executor gateway (POST {base}/mcp, JSON-RPC "tools/call",
+// Bearer token from an app-authorized secret handle). Verified live
+// 2026-11-24: ONLY MCP /mcp exists (OAuth); dotted-path plain POST 404s.
+// The argument shape {accountId, input} is unchanged from the verified
+// live envelope; only the HTTP wrapper moved to MCP.
 //
 // Every outbound request targets one of the five allowlisted tool paths and
 // carries the exact configured accountId. There is no code path in this file
@@ -44,16 +47,19 @@ public class TillerApiClient(
 
 	private string? BaseUrl => configuration[Tiller.TillerConfigurationKeys.BaseUrl];
 	private string? AccountId => configuration[Tiller.TillerConfigurationKeys.AccountId];
+	private string? TokenFile => configuration["TILLER_TOKEN_FILE"];
 
 	public bool IsConfigured =>
-		!string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(AccountId);
+		!string.IsNullOrWhiteSpace(BaseUrl)
+		&& !string.IsNullOrWhiteSpace(AccountId)
+		&& !string.IsNullOrWhiteSpace(TokenFile);
 
 	private void RequireConfigured()
 	{
 		if (!IsConfigured)
 		{
 			throw new InvalidOperationException(
-				"Tiller read interface is not configured (TILLER_BASE_URL / TILLER_ACCOUNT_ID). No request was sent.");
+				"Tiller read interface is not configured (TILLER_BASE_URL / TILLER_ACCOUNT_ID / TILLER_TOKEN_FILE). No request was sent.");
 		}
 	}
 
@@ -67,6 +73,290 @@ public class TillerApiClient(
 
 	// Single choke point: the ONLY place an outbound request is built.
 	// Tool path must be allowlisted; the account envelope is always bound.
+	// Wire: MCP streamable-HTTP tools/call at {base}/mcp with a Bearer
+	// token read from the app-authorized secret handle (TILLER_TOKEN_FILE).
+	private readonly SemaphoreSlim _sessionLock = new(1, 1);
+	private string? _sessionId;
+	private string? _negotiatedVersion;
+	private long _nextRequestId;
+
+	private Uri McpUri
+	{
+		get
+		{
+			string baseUrl = (BaseUrl ?? string.Empty).TrimEnd('/');
+			string endpoint = baseUrl.EndsWith("/mcp", StringComparison.OrdinalIgnoreCase) ? baseUrl : baseUrl + "/mcp";
+			if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri)
+				|| !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+			{
+				throw new InvalidOperationException(
+					"Tiller MCP destination must be an absolute https URI (TILLER_BASE_URL). No request was sent.");
+			}
+
+			return uri;
+		}
+	}
+
+	private string LoadBearerToken()
+	{
+		string? file = TokenFile;
+		if (string.IsNullOrWhiteSpace(file))
+		{
+			throw new InvalidOperationException(
+				"Tiller bearer credential is not wired (TILLER_TOKEN_FILE). No request was sent.");
+		}
+
+		string token;
+		try
+		{
+			token = File.ReadAllText(file).Trim();
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+			throw new InvalidOperationException(
+				"Tiller bearer credential handle is unreadable. No request was sent.");
+		}
+
+		if (string.IsNullOrWhiteSpace(token))
+		{
+			throw new InvalidOperationException(
+				"Tiller bearer credential is empty. No request was sent.");
+		}
+
+		return token;
+	}
+
+	private async Task EnsureMcpSessionAsync(string bearer, CancellationToken cancellationToken)
+	{
+		if (_sessionId is not null)
+		{
+			return;
+		}
+
+		await _sessionLock.WaitAsync(cancellationToken);
+		try
+		{
+			if (_sessionId is not null)
+			{
+				return;
+			}
+
+			using HttpRequestMessage init = new(HttpMethod.Post, McpUri);
+			init.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+			long initId = Interlocked.Increment(ref _nextRequestId);
+			init.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+			init.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+			init.Content = JsonContent.Create(new
+			{
+				jsonrpc = "2.0",
+				id = initId,
+				method = "initialize",
+				@params = new
+				{
+					protocolVersion = "2025-06-18",
+					capabilities = new { },
+					clientInfo = new { name = "receipts-tiller", version = "1.0" },
+				},
+			});
+			using HttpResponseMessage initResponse = await httpClient.SendAsync(init, cancellationToken);
+			if (initResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+			{
+				throw new InvalidOperationException(
+					$"Executor MCP authorization refused (HTTP {(int)initResponse.StatusCode}). No request was sent.");
+			}
+			initResponse.EnsureSuccessStatusCode();
+
+			JsonElement initRoot = await ReadRpcBodyAsync(initResponse, initId, cancellationToken);
+			if (initRoot.TryGetProperty("error", out _))
+			{
+				throw new InvalidOperationException("Executor MCP initialize failed. No request was sent.");
+			}
+			string? negotiated = initRoot.TryGetProperty("result", out JsonElement result)
+				&& result.TryGetProperty("protocolVersion", out JsonElement version)
+				? version.GetString()
+				: null;
+			if (!string.Equals(negotiated, "2025-06-18", StringComparison.Ordinal))
+			{
+				throw new InvalidOperationException(
+					"Executor MCP protocol version is not 2025-06-18 (handshake unproven). No request was sent.");
+			}
+
+			_negotiatedVersion = negotiated;
+
+			if (initResponse.Headers.TryGetValues("Mcp-Session-Id", out IEnumerable<string>? sessionValues))
+			{
+				_sessionId = sessionValues.FirstOrDefault();
+			}
+
+			using HttpRequestMessage initialized = new(HttpMethod.Post, McpUri);
+			initialized.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+			if (_sessionId is not null)
+			{
+				initialized.Headers.Add("Mcp-Session-Id", _sessionId);
+			}
+			if (_negotiatedVersion is not null)
+			{
+				initialized.Headers.Add("MCP-Protocol-Version", _negotiatedVersion);
+			}
+			initialized.Content = JsonContent.Create(new
+			{
+				jsonrpc = "2.0",
+				method = "notifications/initialized",
+			});
+			using HttpResponseMessage _initialized = await httpClient.SendAsync(initialized, cancellationToken);
+		}
+		finally
+		{
+			_sessionLock.Release();
+		}
+	}
+
+	private static async Task<JsonElement> ReadRpcBodyAsync(HttpResponseMessage response, long expectedId, CancellationToken cancellationToken)
+	{
+		string body = await response.Content.ReadAsStringAsync(cancellationToken);
+		string? mediaType = response.Content.Headers.ContentType?.MediaType;
+		if (mediaType is null || !mediaType.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+		{
+			using JsonDocument document = JsonDocument.Parse(body);
+			return document.RootElement.Clone();
+		}
+
+		// SSE: split on blank lines into events, join each event's data:
+		// lines, and return the event whose JSON-RPC id matches. A
+		// notification emitted before the response never wins.
+		List<string> dataLines = [];
+		foreach (string rawLine in body.Split('\n'))
+		{
+			string line = rawLine.Trim();
+			if (line.Length == 0)
+			{
+				JsonElement? matched = MatchEvent(dataLines, expectedId);
+				if (matched.HasValue)
+				{
+					return matched.Value;
+				}
+
+				dataLines.Clear();
+				continue;
+			}
+
+			if (line.StartsWith("data: ", StringComparison.Ordinal))
+			{
+				dataLines.Add(line["data: ".Length..]);
+			}
+		}
+
+		JsonElement? last = MatchEvent(dataLines, expectedId);
+		if (last.HasValue)
+		{
+			return last.Value;
+		}
+
+		throw new InvalidOperationException("Executor MCP response carried no message with the expected id. No result was accepted.");
+	}
+
+	private static JsonElement? MatchEvent(List<string> dataLines, long expectedId)
+	{
+		if (dataLines.Count == 0)
+		{
+			return null;
+		}
+
+		JsonDocument document;
+		try
+		{
+			document = JsonDocument.Parse(string.Join("\n", dataLines));
+		}
+		catch (JsonException)
+		{
+			return null;
+		}
+
+		using (document)
+		{
+			if (document.RootElement.TryGetProperty("id", out JsonElement id)
+				&& id.ValueKind == JsonValueKind.Number
+				&& id.TryGetInt64(out long actual)
+				&& actual == expectedId)
+			{
+				return document.RootElement.Clone();
+			}
+		}
+
+		return null;
+	}
+
+	// Sends one tools/call and parses the id-matched response. On 404
+	// against a live session the session is cleared, the handshake runs
+	// once, and the single read is replayed exactly once. 401/403 never
+	// retry; a second failure throws. No loops.
+	private async Task<JsonElement> SendToolsCallAsync(string path, object input, string bearer, bool hadSession, CancellationToken cancellationToken)
+	{
+		(long callId, HttpRequestMessage call) = BuildToolsCall(path, input, bearer);
+		using (call)
+		{
+			using HttpResponseMessage response = await httpClient.SendAsync(call, cancellationToken);
+			if (response.StatusCode != System.Net.HttpStatusCode.NotFound || !hadSession)
+			{
+				return await ParseToolsCallResultAsync(response, callId, path, cancellationToken);
+			}
+		}
+
+		_sessionId = null;
+		_negotiatedVersion = null;
+		await EnsureMcpSessionAsync(bearer, cancellationToken);
+
+		logger.LogDebug("Tiller read {Path} retrying once after session reset", path);
+		(long replayId, HttpRequestMessage replay) = BuildToolsCall(path, input, bearer);
+		using (replay)
+		{
+			using HttpResponseMessage replayed = await httpClient.SendAsync(replay, cancellationToken);
+			return await ParseToolsCallResultAsync(replayed, replayId, path, cancellationToken);
+		}
+	}
+
+	private (long, HttpRequestMessage) BuildToolsCall(string path, object input, string bearer)
+	{
+		long callId = Interlocked.Increment(ref _nextRequestId);
+		HttpRequestMessage call = new(HttpMethod.Post, McpUri);
+		call.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+		call.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+		call.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+		if (_sessionId is not null)
+		{
+			call.Headers.Add("Mcp-Session-Id", _sessionId);
+		}
+
+		if (_negotiatedVersion is not null)
+		{
+			call.Headers.Add("MCP-Protocol-Version", _negotiatedVersion);
+		}
+
+		call.Content = JsonContent.Create(new
+		{
+			jsonrpc = "2.0",
+			id = callId,
+			method = "tools/call",
+			@params = new
+			{
+				name = path,
+				arguments = new Dictionary<string, object?> { ["accountId"] = AccountId, ["input"] = input },
+			},
+		});
+		return (callId, call);
+	}
+
+	private static async Task<JsonElement> ParseToolsCallResultAsync(HttpResponseMessage response, long callId, string path, CancellationToken cancellationToken)
+	{
+		if (!response.IsSuccessStatusCode)
+		{
+			throw new InvalidOperationException(
+				$"Tiller MCP call {path} failed (HTTP {(int)response.StatusCode}). No result was accepted.");
+		}
+
+		return await ReadRpcBodyAsync(response, callId, cancellationToken);
+	}
+
 	private async Task<JsonElement> InvokeAsync(string path, object input, CancellationToken cancellationToken)
 	{
 		RequireConfigured();
@@ -75,14 +365,49 @@ public class TillerApiClient(
 			throw new InvalidOperationException($"Tiller tool path '{path}' is not in the read-only allowlist. No request was sent.");
 		}
 
-		logger.LogDebug("Tiller read {Path}", path);
-		using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
-			path, new Dictionary<string, object?> { ["accountId"] = AccountId, ["input"] = input }, cancellationToken);
-		response.EnsureSuccessStatusCode();
+		// Strict order: destination validated (https) before the credential
+		// handle is even read; the bearer is never attached to a rejected route.
+		Uri _ = McpUri;
+		string bearer = LoadBearerToken();
+		await EnsureMcpSessionAsync(bearer, cancellationToken);
 
-		using JsonDocument document = await response.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken)
-			?? throw new InvalidOperationException($"Tiller read {path} returned an empty body.");
-		return document.RootElement.Clone();
+		logger.LogDebug("Tiller read {Path}", path);
+		JsonElement root = await SendToolsCallAsync(path, input, bearer, hadSession: _sessionId is not null, cancellationToken);
+		if (root.TryGetProperty("error", out JsonElement rpcError))
+		{
+			string message = rpcError.TryGetProperty("message", out JsonElement rpcMessage)
+				? rpcMessage.GetString() ?? "unknown RPC error"
+				: "unknown RPC error";
+			throw new InvalidOperationException($"Tiller MCP call {path} failed: {message}. No result was accepted.");
+		}
+
+		if (!root.TryGetProperty("result", out JsonElement result))
+		{
+			throw new InvalidOperationException($"Tiller MCP call {path} returned no result. No result was accepted.");
+		}
+
+		if (result.TryGetProperty("isError", out JsonElement isError) && isError.ValueKind == JsonValueKind.True)
+		{
+			throw new InvalidOperationException($"Tiller MCP tool {path} reported an error. No result was accepted.");
+		}
+
+		if (result.TryGetProperty("structuredContent", out JsonElement structured)
+			&& structured.ValueKind == JsonValueKind.Object)
+		{
+			return structured;
+		}
+
+		if (result.TryGetProperty("content", out JsonElement content)
+			&& content.ValueKind == JsonValueKind.Array
+			&& content.GetArrayLength() > 0
+			&& content[0].TryGetProperty("text", out JsonElement text)
+			&& text.ValueKind == JsonValueKind.String)
+		{
+			using JsonDocument document = JsonDocument.Parse(text.GetString() ?? "{}");
+			return document.RootElement.Clone();
+		}
+
+		throw new InvalidOperationException($"Tiller MCP call {path} returned an unusable payload. No result was accepted.");
 	}
 
 	public async Task<IReadOnlyList<TillerSpreadsheet>> ListSpreadsheetsAsync(CancellationToken cancellationToken)

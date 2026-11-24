@@ -9,6 +9,7 @@ public static class TillerConfigurationKeys
 {
 	public const string BaseUrl = "TILLER_BASE_URL";
 	public const string AccountId = "TILLER_ACCOUNT_ID";
+	public const string TokenFile = "TILLER_TOKEN_FILE";
 }
 
 public class TillerClientOptions
