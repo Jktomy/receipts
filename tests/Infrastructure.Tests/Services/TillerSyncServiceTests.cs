@@ -102,7 +102,7 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
-	public async Task PendingToPosted_ReconcilesToOneCanonicalRecord()
+	public async Task PendingAndPosted_DistinctSourceIdsAreNotMerged()
 	{
 		// Arrange
 		_rows.Add(Row("p-1", "2026-11-06", "WHOLEFDS MKT", -15.00m, status: "pending"));
@@ -115,16 +115,16 @@ public class TillerSyncServiceTests
 		TillerSyncResult result = await service.SyncIncrementalAsync(CancellationToken.None);
 
 		// Assert
-		result.Reconciled.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
+		result.Reconciled.Should().Be(0);
+		result.Inserted.Should().Be(1);
+		(await CanonicalCountAsync()).Should().Be(2);
 		await using ApplicationDbContext context = _factory.CreateDbContext();
-		TillerTransactionEntity canon = await context.Set<TillerTransactionEntity>()
-			.SingleAsync(e => e.SupersededBy == null);
-		canon.ProviderTransactionId.Should().Be("t-9");
+		(await context.Set<TillerTransactionEntity>().ToListAsync())
+			.Select(e => e.ProviderTransactionId).Should().BeEquivalentTo("p-1", "t-9");
 	}
 
 	[Fact]
-	public async Task RedeliveredDuplicate_CollapsesWithoutNewRecord()
+	public async Task IdenticalPurchaseFacts_DistinctProviderIdsRemainDistinct()
 	{
 		// Arrange
 		_rows.Add(Row("t-1", "2026-10-01", "WHOLEFDS MKT", -9.99m));
@@ -136,12 +136,31 @@ public class TillerSyncServiceTests
 		TillerSyncResult result = await service.SyncIncrementalAsync(CancellationToken.None);
 
 		// Assert
-		result.Duplicates.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
-		// A third run must stay converged: the duplicate id is remembered.
+		result.Inserted.Should().Be(1);
+		(await CanonicalCountAsync()).Should().Be(2);
+		// A repeat read of the same IDs must stay converged.
 		TillerSyncResult again = await service.SyncIncrementalAsync(CancellationToken.None);
-		again.Duplicates.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
+		again.Inserted.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+	}
+
+	[Fact]
+	public async Task FullReconciliation_UpdatesOlderTransactions()
+	{
+		_rows.Add(Row("old", "2026-10-01", "STORE", -9.99m));
+		_rows.Add(Row("new", "2026-11-05", "STORE", -24.50m));
+		TillerSyncService service = CreateService();
+		await service.SyncFullAsync(CancellationToken.None);
+		_rows[0] = _rows[0] with { Category = "Dining" };
+
+		TillerSyncResult result = await service.SyncFullAsync(CancellationToken.None);
+
+		result.Updated.Should().Be(1);
+		result.Inserted.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerTransactionEntity>().SingleAsync(e => e.ProviderTransactionId == "old"))
+			.Category.Should().Be("Dining");
 	}
 
 	[Fact]
