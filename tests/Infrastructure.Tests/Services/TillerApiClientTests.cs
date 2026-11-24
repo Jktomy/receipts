@@ -32,21 +32,21 @@ public class TillerApiClientTests
 		}
 
 		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			string body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+			Calls.Add((request.Method, request.RequestUri?.AbsolutePath, body));
+			string payload = body.Contains("\"method\":\"initialize\"")
+				? "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\"}}"
+				: body.Contains("\"method\":\"notifications/initialized\"")
+					? "{}"
+					: _payload.Contains("\"spreadsheets\"") || _payload.Contains("\"accounts\"") || _payload.Contains("\"transactions\"") || _payload == "{}"
+						? "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":" + System.Text.Json.JsonSerializer.Serialize(_payload) + "}]}}"
+						: _payload;
+			return new HttpResponseMessage(HttpStatusCode.OK)
 			{
-				string body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-				Calls.Add((request.Method, request.RequestUri?.AbsolutePath, body));
-				string payload = body.Contains("\"method\":\"initialize\"")
-					? "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\"}}"
-					: body.Contains("\"method\":\"notifications/initialized\"")
-						? "{}"
-						: _payload.Contains("\"spreadsheets\"") || _payload.Contains("\"accounts\"") || _payload.Contains("\"transactions\"") || _payload == "{}"
-							? "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":" + System.Text.Json.JsonSerializer.Serialize(_payload) + "}]}}"
-							: _payload;
-				return new HttpResponseMessage(HttpStatusCode.OK)
-				{
-					Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
-				};
-			}
+				Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
+			};
+		}
 	}
 
 	private static TillerApiClient CreateClient(
