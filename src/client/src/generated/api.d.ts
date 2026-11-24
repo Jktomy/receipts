@@ -3321,6 +3321,358 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tiller/connection-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tiller connection status
+         * @description Returns whether the read-only Tiller interface is configured, whether it is reachable, the selected spreadsheet, and the last successful sync timestamp. Performs no upstream writes.
+         */
+        get: operations["Tiller_GetConnectionStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tiller sync status
+         * @description Returns the local sync checkpoint and last successful sync timestamp. Derived from local state; performs no live Tiller call.
+         */
+        get: operations["Tiller_GetStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/spreadsheets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List readable Tiller spreadsheets
+         * @description Returns the spreadsheets available through the connected read-only Tiller interface.
+         */
+        get: operations["Tiller_GetSpreadsheets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/settings/spreadsheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the selected Tiller spreadsheet
+         * @description Returns the currently selected readable spreadsheet ID, if any.
+         */
+        get: operations["Tiller_GetSpreadsheetSettings"];
+        /**
+         * Select the Tiller spreadsheet
+         * @description Validates the spreadsheet against the live readable list, then stores it as the only spreadsheet Tiller reads may touch.
+         */
+        put: operations["Tiller_SelectSpreadsheet"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tiller accounts
+         * @description Returns the financial accounts connected to Tiller. Read-only; no refresh is ever triggered.
+         */
+        get: operations["Tiller_GetAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tiller categories
+         * @description Returns the budget categories of the selected spreadsheet. Empty when no spreadsheet is selected.
+         */
+        get: operations["Tiller_GetCategories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a Tiller sync
+         * @description Backfills history or incrementally syncs new rows into the local cache through the read-only interface. Runs inline in this request; creates no scheduler, worker, or upstream writes.
+         */
+        post: operations["Tiller_Sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List cached Tiller transactions
+         * @description Paged, filterable feed of locally cached Tiller rows with their current receipt-link overlay. Reads local cache only; performs no live Tiller call.
+         */
+        get: operations["Tiller_GetTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/account-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tiller account mappings
+         * @description Returns local-account to Tiller-account mappings for the selected spreadsheet (or the requested one).
+         */
+        get: operations["Tiller_GetAccountMappings"];
+        put?: never;
+        /**
+         * Create a Tiller account mapping
+         * @description Maps one local account to one Tiller account within a single spreadsheet.
+         */
+        post: operations["Tiller_CreateAccountMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/account-mappings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a Tiller account mapping
+         * @description Changes the Tiller side of a mapping. The spreadsheet binding can never change; delete and recreate to move spreadsheets.
+         */
+        put: operations["Tiller_UpdateAccountMapping"];
+        post?: never;
+        /**
+         * Delete a Tiller account mapping
+         * @description Removes a mapping. Synced rows and links are preserved; only the mapping is deleted.
+         */
+        delete: operations["Tiller_DeleteAccountMapping"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/transactions/{providerTransactionId}/suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the receipt-match suggestion for a transaction
+         * @description Deterministic suggestion: exact single links lock (auto), ambiguity lists neutral candidates, missing receipts report none. Local reads only.
+         */
+        get: operations["Tiller_GetSuggestion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/transactions/{providerTransactionId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get link history for a transaction
+         * @description Reviewer audit trail for confirm/unlink/auto-link actions. Local reads only.
+         */
+        get: operations["Tiller_GetHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/transactions/{providerTransactionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manually confirm a receipt link
+         * @description Records an explicit human confirm. Requires a human-verified receipt; rejects already-linked receipts.
+         */
+        post: operations["Tiller_ConfirmLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/transactions/{providerTransactionId}/unlink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove the receipt link from a transaction
+         * @description Deletes active links (history is preserved) and returns a fresh suggestion.
+         */
+        post: operations["Tiller_Unlink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/receipts/{receiptId}/payment-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get payment context for a receipt
+         * @description Returns the linked Tiller row facts (account, date, category) for a receipt, if linked. Local reads only.
+         */
+        get: operations["Tiller_GetPaymentContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get recent Tiller sync events
+         * @description Paginated, filterable feed of local sync attempts, most recent first. Local reads only.
+         */
+        get: operations["Tiller_GetEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiller/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tiller purchase-intelligence analytics
+         * @description Product facts from verified receipts only; unmatched bank rows as neutral context; bank and captured totals in separate buckets. Local reads only.
+         */
+        get: operations["Tiller_GetAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ynab/connection-status": {
         parameters: {
             query?: never;
@@ -7519,6 +7871,241 @@ export interface components {
         YnabMemoSyncOutcome: "synced" | "alreadySynced" | "noMatch" | "ambiguous" | "currencySkipped" | "reconciledSkipped" | "failed";
         /** @enum {string} */
         YnabSyncType: "memoUpdate" | "transactionPush";
+        TillerConnectionStatusDto: {
+            isConfigured: boolean;
+            isConnected: boolean;
+            selectedSpreadsheetId: null | string;
+            /** Format: date-time */
+            lastSuccessfulSyncUtc: null | string;
+        };
+        TillerSyncStatusDto: {
+            spreadsheetId: null | string;
+            /** Format: date */
+            syncedThroughDate: null | string;
+            completed: boolean;
+            /** Format: date-time */
+            lastSuccessfulSyncUtc: null | string;
+        };
+        TillerSpreadsheetDto: {
+            spreadsheetId: string;
+            title: string;
+            editable: boolean;
+            backendAutoFill: boolean;
+            /** Format: int32 */
+            accountCount: number | string;
+        };
+        TillerSelectedSpreadsheetDto: {
+            selectedSpreadsheetId: null | string;
+        };
+        SelectTillerSpreadsheetRequest: {
+            spreadsheetId: string;
+        };
+        TillerAccountDto: {
+            accountId: string;
+            displayName: string;
+            institution: string;
+            accountType: string;
+            class: string;
+        };
+        TillerCategoryDto: {
+            name: string;
+            group: string;
+            type: string;
+            hideFromReports: boolean;
+        };
+        SyncTillerRequest: {
+            /** @default full */
+            mode: string;
+        };
+        TillerSyncResultDto: {
+            /** Format: int32 */
+            inserted: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            reconciled: number | string;
+            /** Format: int32 */
+            duplicates: number | string;
+            /** Format: int32 */
+            invalid: number | string;
+            /** Format: int32 */
+            pages: number | string;
+        };
+        TillerTransactionListDto: {
+            rows: components["schemas"]["TillerStoredTransactionDto"][];
+            /** Format: int32 */
+            total: number | string;
+        };
+        TillerAccountMappingListDto: {
+            data: components["schemas"]["TillerAccountMappingResponse"][];
+        };
+        CreateTillerAccountMappingRequest: {
+            /** Format: uuid */
+            receiptsAccountId: string;
+            tillerAccountId: string;
+            tillerAccountName: string;
+            spreadsheetId: string;
+        };
+        TillerAccountMappingResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            receiptsAccountId: string;
+            tillerAccountId: string;
+            tillerAccountName: string;
+            spreadsheetId: string;
+        };
+        UpdateTillerAccountMappingRequest: {
+            tillerAccountId: string;
+            tillerAccountName: string;
+            spreadsheetId: string;
+        };
+        TillerMatchSuggestionDto: {
+            decision: string;
+            /** Format: uuid */
+            receiptId: null | string;
+            confidence: null | string;
+            candidates: components["schemas"]["TillerMatchCandidateDto"][];
+        };
+        TillerLinkHistoryListDto: {
+            data: components["schemas"]["TillerLinkHistoryDto"][];
+        };
+        ConfirmTillerLinkRequest: {
+            /** Format: uuid */
+            receiptId: string;
+            reviewer: null | string;
+        };
+        UnlinkTillerLinkRequest: {
+            reviewer: null | string;
+        };
+        TillerPaymentContextDto: {
+            providerTransactionId: string;
+            /** Format: date */
+            date: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            account: string;
+            category: null | string;
+            linkKind: null | string;
+        };
+        TillerSyncEventListDto: {
+            rows: components["schemas"]["TillerSyncEventDto"][];
+            /** Format: int32 */
+            total: number | string;
+        };
+        TillerAnalyticsDto: {
+            products: components["schemas"]["TillerProductFactDto"][];
+            baskets: components["schemas"]["TillerBasketDto"][];
+            stores: components["schemas"]["TillerStoreRollupDto"][];
+            unmatchedTransactions: components["schemas"]["TillerUnmatchedTransactionDto"][];
+            alerts: string[];
+            /** Format: int32 */
+            capturedReceiptCount: number | string;
+            /** Format: double */
+            bankSpendingTotal: number | string;
+            /** Format: double */
+            capturedReceiptsTotal: number | string;
+            capturedReceiptsNote: string;
+        };
+        TillerStoredTransactionDto: {
+            /** Format: uuid */
+            id: string;
+            providerTransactionId: string;
+            /** Format: date */
+            date: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            category: null | string;
+            account: string;
+            institution: string;
+            status: string;
+            splitGroupId: null | string;
+            /** Format: int32 */
+            revision: number | string;
+            linkKind: null | string;
+            /** Format: uuid */
+            linkedReceiptId: null | string;
+        };
+        TillerMatchCandidateDto: {
+            /** Format: uuid */
+            receiptId: string;
+            providerTransactionId: string;
+            /** Format: int32 */
+            dateWithinDays: number | string;
+        };
+        TillerLinkHistoryDto: {
+            action: string;
+            /** Format: uuid */
+            receiptId: null | string;
+            reviewer: null | string;
+            /** Format: date-time */
+            at: string;
+        };
+        TillerSyncEventDto: {
+            /** Format: uuid */
+            id: string;
+            eventType: string;
+            success: boolean;
+            /** Format: int32 */
+            inserted: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            reconciled: number | string;
+            /** Format: int32 */
+            duplicates: number | string;
+            errorMessage: null | string;
+            /** Format: date-time */
+            occurredAt: string;
+        };
+        TillerProductFactDto: {
+            description: string;
+            /** Format: double */
+            quantity: number | string;
+            /** Format: double */
+            unitPrice: number | string;
+            /** Format: double */
+            total: number | string;
+            store: string;
+            /** Format: uuid */
+            receiptId: string;
+            /** Format: date */
+            receiptDate: string;
+        };
+        TillerBasketDto: {
+            /** Format: uuid */
+            receiptId: string;
+            store: string;
+            /** Format: date */
+            date: string;
+            payment: null | components["schemas"]["TillerBasketPaymentDto"];
+        };
+        TillerStoreRollupDto: {
+            store: string;
+            /** Format: int32 */
+            receiptCount: number | string;
+            /** Format: double */
+            total: number | string;
+        };
+        TillerUnmatchedTransactionDto: {
+            providerTransactionId: string;
+            /** Format: date */
+            date: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            account: string;
+            category: null | string;
+        };
+        TillerBasketPaymentDto: {
+            providerTransactionId: string;
+            account: string;
+            /** Format: date */
+            date: string;
+            category: null | string;
+        };
     };
     responses: never;
     parameters: {
@@ -16583,6 +17170,632 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": string;
+                };
+            };
+        };
+    };
+    Tiller_GetConnectionStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerConnectionStatusDto"];
+                };
+            };
+        };
+    };
+    Tiller_GetStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSyncStatusDto"];
+                };
+            };
+        };
+    };
+    Tiller_GetSpreadsheets: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSpreadsheetDto"][];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetSpreadsheetSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSelectedSpreadsheetDto"];
+                };
+            };
+        };
+    };
+    Tiller_SelectSpreadsheet: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectTillerSpreadsheetRequest"];
+                "text/json": components["schemas"]["SelectTillerSpreadsheetRequest"];
+                "application/*+json": components["schemas"]["SelectTillerSpreadsheetRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSelectedSpreadsheetDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetAccounts: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerAccountDto"][];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetCategories: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerCategoryDto"][];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_Sync: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncTillerRequest"];
+                "text/json": components["schemas"]["SyncTillerRequest"];
+                "application/*+json": components["schemas"]["SyncTillerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSyncResultDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetTransactions: {
+        parameters: {
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+                sortBy?: string;
+                sortDirection?: string;
+                search?: string;
+                unlinkedOnly?: boolean;
+                account?: string;
+            };
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerTransactionListDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    Tiller_GetAccountMappings: {
+        parameters: {
+            query?: {
+                spreadsheetId?: string;
+            };
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerAccountMappingListDto"];
+                };
+            };
+        };
+    };
+    Tiller_CreateAccountMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTillerAccountMappingRequest"];
+                "text/json": components["schemas"]["CreateTillerAccountMappingRequest"];
+                "application/*+json": components["schemas"]["CreateTillerAccountMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerAccountMappingResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    Tiller_UpdateAccountMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTillerAccountMappingRequest"];
+                "text/json": components["schemas"]["UpdateTillerAccountMappingRequest"];
+                "application/*+json": components["schemas"]["UpdateTillerAccountMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    Tiller_DeleteAccountMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetSuggestion: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                providerTransactionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerMatchSuggestionDto"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetHistory: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                providerTransactionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerLinkHistoryListDto"];
+                };
+            };
+        };
+    };
+    Tiller_ConfirmLink: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                providerTransactionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmTillerLinkRequest"];
+                "text/json": components["schemas"]["ConfirmTillerLinkRequest"];
+                "application/*+json": components["schemas"]["ConfirmTillerLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerMatchSuggestionDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_Unlink: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                providerTransactionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["UnlinkTillerLinkRequest"];
+                "text/json": null | components["schemas"]["UnlinkTillerLinkRequest"];
+                "application/*+json": null | components["schemas"]["UnlinkTillerLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerMatchSuggestionDto"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetPaymentContext: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path: {
+                receiptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerPaymentContextDto"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_GetEvents: {
+        parameters: {
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+                outcome?: string;
+            };
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSyncEventListDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    Tiller_GetAnalytics: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerAnalyticsDto"];
                 };
             };
         };

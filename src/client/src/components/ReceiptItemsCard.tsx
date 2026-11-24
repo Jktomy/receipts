@@ -165,6 +165,9 @@ export function ReceiptItemsCard({
           description: values.description,
           quantity: values.quantity,
           unitPrice: values.unitPrice,
+          unitOfMeasure: values.unitOfMeasure,
+          packageContentQuantity: values.packageContentQuantity,
+          packageContentUnit: values.packageContentUnit,
           // Present only when this line was entered from a template and the description still
           // matches it. The server uses it to stamp the item's canonical description and skip
           // the resolver (RECEIPTS-881).
@@ -200,6 +203,9 @@ export function ReceiptItemsCard({
           description: values.description,
           quantity: values.quantity,
           unitPrice: values.unitPrice,
+          unitOfMeasure: values.unitOfMeasure,
+          packageContentQuantity: values.packageContentQuantity,
+          packageContentUnit: values.packageContentUnit,
           normalizationIntent: values.normalizationIntent,
           classification: values.classification,
         },
@@ -501,6 +507,10 @@ export function ReceiptItemsCard({
                 description: editItem.description,
                 quantity: editItem.quantity,
                 unitPrice: editItem.unitPrice,
+                unitOfMeasure: editItem.unitOfMeasure ?? undefined,
+                packageContentQuantity:
+                  editItem.packageContentQuantity ?? undefined,
+                packageContentUnit: editItem.packageContentUnit ?? undefined,
               }}
               hideReceiptField
               isSubmitting={updateReceiptItem.isPending}

@@ -435,6 +435,11 @@ it.each(["item form", "line entry"] as const)(
     );
     await user.click(codeInput);
     fireEvent.change(codeInput, { target: { value: "MILK" } });
+    await waitFor(() =>
+      expect(suggestionRequests).toEqual([
+        { code: "MILK", location: "Wire market" },
+      ]),
+    );
     const locationOption = await screen.findByRole("option", {
       name: /Location milk/,
     });

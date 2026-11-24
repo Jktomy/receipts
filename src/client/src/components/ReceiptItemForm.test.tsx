@@ -1138,3 +1138,137 @@ describe("item-code suggestion category", () => {
     expect(categoryPicker()).toHaveAttribute("title", "Choose category");
   });
 });
+
+describe("ReceiptItemForm units", () => {
+  it("renders unit and package-content fields in create mode", () => {
+    render(
+      <ReceiptItemForm
+        mode="create"
+        defaultValues={{ receiptId: "r-1", quantity: 1 }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Unit")).toBeInTheDocument();
+    expect(screen.getByLabelText("Package quantity")).toBeInTheDocument();
+    expect(screen.getByLabelText("Package unit")).toBeInTheDocument();
+  });
+
+  it("pre-populates unit fields from defaultValues", () => {
+    render(
+      <ReceiptItemForm
+        mode="edit"
+        defaultValues={{
+          receiptId: "r-1",
+          description: "Orange Juice",
+          quantity: 1,
+          unitPrice: 3,
+          unitOfMeasure: "each",
+          packageContentQuantity: 64,
+          packageContentUnit: "fl_oz",
+        }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Package quantity")).toHaveDisplayValue("64");
+    expect(screen.getByText(/per 100 ml/)).toBeInTheDocument();
+  });
+
+  it("submits unit fields with the form", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ReceiptItemForm
+        mode="create"
+        defaultValues={{
+          receiptId: "r-1",
+          receiptItemCode: "OJ-64",
+          description: "Orange Juice",
+          quantity: 1,
+          unitPrice: 3,
+          unitOfMeasure: "each",
+          packageContentQuantity: 64,
+          packageContentUnit: "fl_oz",
+        }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Create Item" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      unitOfMeasure: "each",
+      packageContentQuantity: 64,
+      packageContentUnit: "fl_oz",
+    });
+  });
+
+  it("blocks submit with half-modeled package content", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ReceiptItemForm
+        mode="create"
+        defaultValues={{
+          receiptId: "r-1",
+          description: "Orange Juice",
+          quantity: 1,
+          unitPrice: 3,
+          packageContentQuantity: 64,
+        }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Create Item" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/package content unit/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("ReceiptItemForm unit selection", () => {
+  beforeAll(() => {
+    Element.prototype.hasPointerCapture ??= () => false;
+    Element.prototype.setPointerCapture ??= () => {};
+    Element.prototype.releasePointerCapture ??= () => {};
+  });
+
+  it("selects units through the dropdowns and submits the serialized contract", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ReceiptItemForm
+        mode="create"
+        defaultValues={{
+          receiptId: "r-1",
+          receiptItemCode: "OJ-64",
+          description: "Orange Juice",
+          quantity: 1,
+          unitPrice: 3,
+        }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Unit" }));
+    await user.click(screen.getByRole("option", { name: "each" }));
+    await user.type(screen.getByLabelText("Package quantity"), "64");
+    await user.click(screen.getByRole("combobox", { name: "Package unit" }));
+    await user.click(screen.getByRole("option", { name: "fl_oz" }));
+    expect(screen.getByText(/per 100 ml/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create Item" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      receiptItemCode: "OJ-64",
+      description: "Orange Juice",
+      quantity: 1,
+      unitPrice: 3,
+      unitOfMeasure: "each",
+      packageContentQuantity: 64,
+      packageContentUnit: "fl_oz",
+    });
+  });
+});

@@ -479,9 +479,11 @@ it("keeps loaded ISO-date matches when remote location search returns no rows", 
 
 it("finds a remote location beyond the browse page and uses its location for suggestions", async () => {
   const locations: (string | null)[] = [];
+  const searches: string[] = [];
   server.use(
     http.get("*/api/receipts", ({ request }) => {
       const q = new URL(request.url).searchParams.get("q") ?? "";
+      searches.push(q);
       return HttpResponse.json({
         data: q
           ? [
@@ -527,6 +529,7 @@ it("finds a remote location beyond the browse page and uses its location for sug
   await user.click(screen.getByRole("combobox", { name: /^Receipt/ }));
   await screen.findByRole("option");
   await user.type(screen.getByPlaceholderText("Search receipts..."), "Far");
+  await waitFor(() => expect(searches).toContain("Far"));
   const choice = await screen.findByRole("option", { name: /Far market/ });
   await user.click(choice);
   expect(screen.getByRole("combobox", { name: /^Receipt/ })).toHaveTextContent(
@@ -631,6 +634,7 @@ it("does not present an obsolete next-page failure as the retry for a newly type
   await screen.findByRole("option");
   const search = screen.getByPlaceholderText("Search receipts...");
   await user.type(search, "Alpha");
+  await waitFor(() => expect(searches).toContain("Alpha"));
   await screen.findByRole("option", { name: /Alpha market/ });
   await user.click(screen.getByRole("button", { name: "Load more receipts" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -647,6 +651,7 @@ it("does not present an obsolete next-page failure as the retry for a newly type
   expect(
     screen.queryByRole("button", { name: "Retry" }),
   ).not.toBeInTheDocument();
+  await waitFor(() => expect(searches).toContain("Beta"));
   expect(
     await screen.findByRole("option", { name: /Beta market/ }),
   ).toBeVisible();
@@ -655,9 +660,11 @@ it("does not present an obsolete next-page failure as the retry for a newly type
 it("reopens a held search into the current query without publishing the old result", async () => {
   const oldStarted = deferred();
   const oldGate = deferred();
+  const searches: string[] = [];
   server.use(
     http.get("*/api/receipts", async ({ request }) => {
       const q = new URL(request.url).searchParams.get("q") ?? "";
+      searches.push(q);
       if (q === "Alpha") {
         oldStarted.resolve();
         await oldGate.promise;
@@ -695,6 +702,7 @@ it("reopens a held search into the current query without publishing the old resu
     const currentSearch = screen.getByPlaceholderText("Search receipts...");
     expect(currentSearch).toHaveValue("");
     await user.type(currentSearch, "Beta");
+    await waitFor(() => expect(searches).toContain("Beta"));
     expect(
       await screen.findByRole("option", { name: /Beta market/ }),
     ).toBeVisible();

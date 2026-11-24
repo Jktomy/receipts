@@ -5,6 +5,7 @@ using Infrastructure.Entities;
 using Infrastructure.Interfaces.Repositories;
 using Infrastructure.Mapping;
 using Infrastructure.Repositories;
+using Infrastructure.Tiller;
 using Infrastructure.Ynab;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -239,6 +240,24 @@ public static class InfrastructureService
 				MinimumThroughput = 5,
 				BreakDuration = TimeSpan.FromSeconds(60),
 			});
+		});
+
+		// Native Tiller read interface (W20 integration hunk). Server-side
+		// configuration only (TILLER_BASE_URL/TILLER_ACCOUNT_ID); no
+		// registered service can write to the provider (read RPCs only).
+		services
+			.AddScoped<ITillerApiClient, TillerApiClient>()
+			.AddScoped<ITillerSelectionService, TillerSelectionService>()
+			.AddScoped<ITillerAccountMappingService, TillerAccountMappingService>()
+			.AddScoped<ITillerSyncService, TillerSyncService>()
+			.AddScoped<ITillerMatchingService, TillerMatchingService>()
+			.AddScoped<ITillerReceiptCatalog, TillerReceiptCatalog>()
+			.AddScoped<ITillerTransactionReader, TillerTransactionReader>()
+			.AddScoped<ITillerAnalyticsService, TillerAnalyticsService>();
+		services.AddSingleton(new TillerClientOptions());
+		services.AddHttpClient<ITillerApiClient, TillerApiClient>(client =>
+		{
+			client.BaseAddress = new Uri(configuration[TillerConfigurationKeys.BaseUrl]?.TrimEnd('/') + "/");
 		});
 
 		// Singleton AI/ML services. The ONNX model is provisioned onto a volume at runtime

@@ -87,6 +87,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 	public virtual DbSet<YnabCategoryMappingEntity> YnabCategoryMappings { get; set; } = null!;
 	public virtual DbSet<YnabServerKnowledgeEntity> YnabServerKnowledge { get; set; } = null!;
 	public virtual DbSet<YnabSyncEventEntity> YnabSyncEvents { get; set; } = null!;
+	public virtual DbSet<TillerSelectedSpreadsheetEntity> TillerSelectedSpreadsheets { get; set; } = null!;
+	public virtual DbSet<TillerAccountMappingEntity> TillerAccountMappings { get; set; } = null!;
+	public virtual DbSet<TillerTransactionEntity> TillerTransactions { get; set; } = null!;
+	public virtual DbSet<TillerKnownIdEntity> TillerKnownIds { get; set; } = null!;
+	public virtual DbSet<TillerCheckpointEntity> TillerCheckpoints { get; set; } = null!;
+	public virtual DbSet<TillerSyncEventEntity> TillerSyncEvents { get; set; } = null!;
+	public virtual DbSet<TillerReceiptLinkEntity> TillerReceiptLinks { get; set; } = null!;
+	public virtual DbSet<TillerLinkEventEntity> TillerLinkEvents { get; set; } = null!;
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{

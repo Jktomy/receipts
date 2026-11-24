@@ -115,6 +115,9 @@ export function useCreateReceiptItem() {
         description: string;
         quantity: number;
         unitPrice: number;
+        unitOfMeasure?: string | null;
+        packageContentQuantity?: number | null;
+        packageContentUnit?: string | null;
         /** Set when the line was entered from a template (RECEIPTS-881). */
         itemTemplateId?: string;
         normalizationIntent?: ReceiptNormalizationIntent;
@@ -161,6 +164,9 @@ export function useUpdateReceiptItem() {
         description: string;
         quantity: number;
         unitPrice: number;
+        unitOfMeasure?: string | null;
+        packageContentQuantity?: number | null;
+        packageContentUnit?: string | null;
         normalizationIntent?: ReceiptNormalizationIntent;
         classification?: ClassificationRequest;
       };

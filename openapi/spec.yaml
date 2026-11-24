@@ -8505,6 +8505,633 @@ paths:
   # YNAB
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  # Tiller native read-only interface (mirrors generated API.json).
+  /api/tiller/connection-status:
+    get:
+      tags:
+        - Tiller
+      summary: Get Tiller connection status
+      description: >-
+        Returns whether the read-only Tiller interface is configured, whether it is reachable, the selected spreadsheet, and the last
+        successful sync timestamp. Performs no upstream writes.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerConnectionStatusDto'
+      operationId: Tiller_GetConnectionStatus
+  /api/tiller/status:
+    get:
+      tags:
+        - Tiller
+      summary: Get Tiller sync status
+      description: Returns the local sync checkpoint and last successful sync timestamp. Derived from local state; performs no live Tiller call.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSyncStatusDto'
+      operationId: Tiller_GetStatus
+  /api/tiller/spreadsheets:
+    get:
+      tags:
+        - Tiller
+      summary: List readable Tiller spreadsheets
+      description: Returns the spreadsheets available through the connected read-only Tiller interface.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TillerSpreadsheetDto'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_GetSpreadsheets
+  /api/tiller/settings/spreadsheet:
+    get:
+      tags:
+        - Tiller
+      summary: Get the selected Tiller spreadsheet
+      description: Returns the currently selected readable spreadsheet ID, if any.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSelectedSpreadsheetDto'
+      operationId: Tiller_GetSpreadsheetSettings
+    put:
+      tags:
+        - Tiller
+      summary: Select the Tiller spreadsheet
+      description: Validates the spreadsheet against the live readable list, then stores it as the only spreadsheet Tiller reads may touch.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectTillerSpreadsheetRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/SelectTillerSpreadsheetRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/SelectTillerSpreadsheetRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSelectedSpreadsheetDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_SelectSpreadsheet
+  /api/tiller/accounts:
+    get:
+      tags:
+        - Tiller
+      summary: List Tiller accounts
+      description: Returns the financial accounts connected to Tiller. Read-only; no refresh is ever triggered.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TillerAccountDto'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_GetAccounts
+  /api/tiller/categories:
+    get:
+      tags:
+        - Tiller
+      summary: List Tiller categories
+      description: Returns the budget categories of the selected spreadsheet. Empty when no spreadsheet is selected.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TillerCategoryDto'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_GetCategories
+  /api/tiller/sync:
+    post:
+      tags:
+        - Tiller
+      summary: Run a Tiller sync
+      description: >-
+        Backfills history or incrementally syncs new rows into the local cache through the read-only interface. Runs inline in this request;
+        creates no scheduler, worker, or upstream writes.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncTillerRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/SyncTillerRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/SyncTillerRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSyncResultDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_Sync
+  /api/tiller/transactions:
+    get:
+      tags:
+        - Tiller
+      summary: List cached Tiller transactions
+      description: >-
+        Paged, filterable feed of locally cached Tiller rows with their current receipt-link overlay. Reads local cache only; performs no live
+        Tiller call.
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            pattern: ^-?(?:0|[1-9]\d*)$
+            type:
+              - integer
+              - string
+            format: int32
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            pattern: ^-?(?:0|[1-9]\d*)$
+            type:
+              - integer
+              - string
+            format: int32
+            default: 50
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+        - name: sortDirection
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: unlinkedOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: account
+          in: query
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerTransactionListDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      operationId: Tiller_GetTransactions
+  /api/tiller/account-mappings:
+    get:
+      tags:
+        - Tiller
+      summary: List Tiller account mappings
+      description: Returns local-account to Tiller-account mappings for the selected spreadsheet (or the requested one).
+      parameters:
+        - name: spreadsheetId
+          in: query
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerAccountMappingListDto'
+      operationId: Tiller_GetAccountMappings
+    post:
+      tags:
+        - Tiller
+      summary: Create a Tiller account mapping
+      description: Maps one local account to one Tiller account within a single spreadsheet.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTillerAccountMappingRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/CreateTillerAccountMappingRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/CreateTillerAccountMappingRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerAccountMappingResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      operationId: Tiller_CreateAccountMapping
+  /api/tiller/account-mappings/{id}:
+    put:
+      tags:
+        - Tiller
+      summary: Update a Tiller account mapping
+      description: Changes the Tiller side of a mapping. The spreadsheet binding can never change; delete and recreate to move spreadsheets.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTillerAccountMappingRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTillerAccountMappingRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/UpdateTillerAccountMappingRequest'
+        required: true
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      operationId: Tiller_UpdateAccountMapping
+    delete:
+      tags:
+        - Tiller
+      summary: Delete a Tiller account mapping
+      description: Removes a mapping. Synced rows and links are preserved; only the mapping is deleted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+      operationId: Tiller_DeleteAccountMapping
+  /api/tiller/transactions/{providerTransactionId}/suggestion:
+    get:
+      tags:
+        - Tiller
+      summary: Get the receipt-match suggestion for a transaction
+      description: >-
+        Deterministic suggestion: exact single links lock (auto), ambiguity lists neutral candidates, missing receipts report none. Local
+        reads only.
+      parameters:
+        - name: providerTransactionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerMatchSuggestionDto'
+        '404':
+          description: Not Found
+      operationId: Tiller_GetSuggestion
+  /api/tiller/transactions/{providerTransactionId}/history:
+    get:
+      tags:
+        - Tiller
+      summary: Get link history for a transaction
+      description: Reviewer audit trail for confirm/unlink/auto-link actions. Local reads only.
+      parameters:
+        - name: providerTransactionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerLinkHistoryListDto'
+      operationId: Tiller_GetHistory
+  /api/tiller/transactions/{providerTransactionId}/confirm:
+    post:
+      tags:
+        - Tiller
+      summary: Manually confirm a receipt link
+      description: Records an explicit human confirm. Requires a human-verified receipt; rejects already-linked receipts.
+      parameters:
+        - name: providerTransactionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmTillerLinkRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmTillerLinkRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/ConfirmTillerLinkRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerMatchSuggestionDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Not Found
+      operationId: Tiller_ConfirmLink
+  /api/tiller/transactions/{providerTransactionId}/unlink:
+    post:
+      tags:
+        - Tiller
+      summary: Remove the receipt link from a transaction
+      description: Deletes active links (history is preserved) and returns a fresh suggestion.
+      parameters:
+        - name: providerTransactionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UnlinkTillerLinkRequest'
+          text/json:
+            schema:
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UnlinkTillerLinkRequest'
+          application/*+json:
+            schema:
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UnlinkTillerLinkRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerMatchSuggestionDto'
+        '404':
+          description: Not Found
+      operationId: Tiller_Unlink
+  /api/tiller/receipts/{receiptId}/payment-context:
+    get:
+      tags:
+        - Tiller
+      summary: Get payment context for a receipt
+      description: Returns the linked Tiller row facts (account, date, category) for a receipt, if linked. Local reads only.
+      parameters:
+        - name: receiptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerPaymentContextDto'
+        '404':
+          description: Not Found
+      operationId: Tiller_GetPaymentContext
+  /api/tiller/events:
+    get:
+      tags:
+        - Tiller
+      summary: Get recent Tiller sync events
+      description: Paginated, filterable feed of local sync attempts, most recent first. Local reads only.
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            pattern: ^-?(?:0|[1-9]\d*)$
+            type:
+              - integer
+              - string
+            format: int32
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            pattern: ^-?(?:0|[1-9]\d*)$
+            type:
+              - integer
+              - string
+            format: int32
+            default: 50
+        - name: outcome
+          in: query
+          schema:
+            type: string
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSyncEventListDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      operationId: Tiller_GetEvents
+  /api/tiller/analytics:
+    get:
+      tags:
+        - Tiller
+      summary: Get Tiller purchase-intelligence analytics
+      description: >-
+        Product facts from verified receipts only; unmatched bank rows as neutral context; bank and captured totals in separate buckets. Local
+        reads only.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerAnalyticsDto'
+      operationId: Tiller_GetAnalytics
+
   /api/ynab/connection-status:
     get:
       operationId: GetYnabConnectionStatus
@@ -16479,6 +17106,693 @@ components:
     YnabSyncType:
       type: string
       enum: [memoUpdate, transactionPush]
+
+    # Tiller DTOs (mirrors generated API.json).
+    TillerConnectionStatusDto:
+      required:
+        - isConfigured
+        - isConnected
+        - selectedSpreadsheetId
+        - lastSuccessfulSyncUtc
+      type: object
+      properties:
+        isConfigured:
+          type: boolean
+        isConnected:
+          type: boolean
+        selectedSpreadsheetId:
+          type:
+            - 'null'
+            - string
+        lastSuccessfulSyncUtc:
+          type:
+            - 'null'
+            - string
+          format: date-time
+    TillerSyncStatusDto:
+      required:
+        - spreadsheetId
+        - syncedThroughDate
+        - completed
+        - lastSuccessfulSyncUtc
+      type: object
+      properties:
+        spreadsheetId:
+          type:
+            - 'null'
+            - string
+        syncedThroughDate:
+          type:
+            - 'null'
+            - string
+          format: date
+        completed:
+          type: boolean
+        lastSuccessfulSyncUtc:
+          type:
+            - 'null'
+            - string
+          format: date-time
+    TillerSpreadsheetDto:
+      required:
+        - spreadsheetId
+        - title
+        - editable
+        - backendAutoFill
+        - accountCount
+      type: object
+      properties:
+        spreadsheetId:
+          type: string
+        title:
+          type: string
+        editable:
+          type: boolean
+        backendAutoFill:
+          type: boolean
+        accountCount:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+    TillerSelectedSpreadsheetDto:
+      required:
+        - selectedSpreadsheetId
+      type: object
+      properties:
+        selectedSpreadsheetId:
+          type:
+            - 'null'
+            - string
+    SelectTillerSpreadsheetRequest:
+      required:
+        - spreadsheetId
+      type: object
+      properties:
+        spreadsheetId:
+          type: string
+    TillerAccountDto:
+      required:
+        - accountId
+        - displayName
+        - institution
+        - accountType
+        - class
+      type: object
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+        institution:
+          type: string
+        accountType:
+          type: string
+        class:
+          type: string
+    TillerCategoryDto:
+      required:
+        - name
+        - group
+        - type
+        - hideFromReports
+      type: object
+      properties:
+        name:
+          type: string
+        group:
+          type: string
+        type:
+          type: string
+        hideFromReports:
+          type: boolean
+    SyncTillerRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          default: full
+    TillerSyncResultDto:
+      required:
+        - inserted
+        - updated
+        - reconciled
+        - duplicates
+        - invalid
+        - pages
+      type: object
+      properties:
+        inserted:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        updated:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        reconciled:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        duplicates:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        invalid:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        pages:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+    TillerTransactionListDto:
+      required:
+        - rows
+        - total
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerStoredTransactionDto'
+        total:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+    TillerAccountMappingListDto:
+      required:
+        - data
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerAccountMappingResponse'
+    CreateTillerAccountMappingRequest:
+      required:
+        - receiptsAccountId
+        - tillerAccountId
+        - tillerAccountName
+        - spreadsheetId
+      type: object
+      properties:
+        receiptsAccountId:
+          type: string
+          format: uuid
+        tillerAccountId:
+          type: string
+        tillerAccountName:
+          type: string
+        spreadsheetId:
+          type: string
+    TillerAccountMappingResponse:
+      required:
+        - id
+        - receiptsAccountId
+        - tillerAccountId
+        - tillerAccountName
+        - spreadsheetId
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        receiptsAccountId:
+          type: string
+          format: uuid
+        tillerAccountId:
+          type: string
+        tillerAccountName:
+          type: string
+        spreadsheetId:
+          type: string
+    UpdateTillerAccountMappingRequest:
+      required:
+        - tillerAccountId
+        - tillerAccountName
+        - spreadsheetId
+      type: object
+      properties:
+        tillerAccountId:
+          type: string
+        tillerAccountName:
+          type: string
+        spreadsheetId:
+          type: string
+    TillerMatchSuggestionDto:
+      required:
+        - decision
+        - receiptId
+        - confidence
+        - candidates
+      type: object
+      properties:
+        decision:
+          type: string
+        receiptId:
+          type:
+            - 'null'
+            - string
+          format: uuid
+        confidence:
+          type:
+            - 'null'
+            - string
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerMatchCandidateDto'
+    TillerLinkHistoryListDto:
+      required:
+        - data
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerLinkHistoryDto'
+    ConfirmTillerLinkRequest:
+      required:
+        - receiptId
+        - reviewer
+      type: object
+      properties:
+        receiptId:
+          type: string
+          format: uuid
+        reviewer:
+          type:
+            - 'null'
+            - string
+    UnlinkTillerLinkRequest:
+      required:
+        - reviewer
+      type: object
+      properties:
+        reviewer:
+          type:
+            - 'null'
+            - string
+    TillerPaymentContextDto:
+      required:
+        - providerTransactionId
+        - date
+        - description
+        - amount
+        - account
+        - category
+        - linkKind
+      type: object
+      properties:
+        providerTransactionId:
+          type: string
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        account:
+          type: string
+        category:
+          type:
+            - 'null'
+            - string
+        linkKind:
+          type:
+            - 'null'
+            - string
+    TillerSyncEventListDto:
+      required:
+        - rows
+        - total
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerSyncEventDto'
+        total:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+    TillerAnalyticsDto:
+      required:
+        - products
+        - baskets
+        - stores
+        - unmatchedTransactions
+        - alerts
+        - capturedReceiptCount
+        - bankSpendingTotal
+        - capturedReceiptsTotal
+        - capturedReceiptsNote
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerProductFactDto'
+        baskets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerBasketDto'
+        stores:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerStoreRollupDto'
+        unmatchedTransactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerUnmatchedTransactionDto'
+        alerts:
+          type: array
+          items:
+            type: string
+        capturedReceiptCount:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        bankSpendingTotal:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        capturedReceiptsTotal:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        capturedReceiptsNote:
+          type: string
+    TillerStoredTransactionDto:
+      required:
+        - id
+        - providerTransactionId
+        - date
+        - description
+        - amount
+        - category
+        - account
+        - institution
+        - status
+        - splitGroupId
+        - revision
+        - linkKind
+        - linkedReceiptId
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        providerTransactionId:
+          type: string
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        category:
+          type:
+            - 'null'
+            - string
+        account:
+          type: string
+        institution:
+          type: string
+        status:
+          type: string
+        splitGroupId:
+          type:
+            - 'null'
+            - string
+        revision:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        linkKind:
+          type:
+            - 'null'
+            - string
+        linkedReceiptId:
+          type:
+            - 'null'
+            - string
+          format: uuid
+    TillerMatchCandidateDto:
+      required:
+        - receiptId
+        - providerTransactionId
+        - dateWithinDays
+      type: object
+      properties:
+        receiptId:
+          type: string
+          format: uuid
+        providerTransactionId:
+          type: string
+        dateWithinDays:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+    TillerLinkHistoryDto:
+      required:
+        - action
+        - receiptId
+        - reviewer
+        - at
+      type: object
+      properties:
+        action:
+          type: string
+        receiptId:
+          type:
+            - 'null'
+            - string
+          format: uuid
+        reviewer:
+          type:
+            - 'null'
+            - string
+        at:
+          type: string
+          format: date-time
+    TillerSyncEventDto:
+      required:
+        - id
+        - eventType
+        - success
+        - inserted
+        - updated
+        - reconciled
+        - duplicates
+        - errorMessage
+        - occurredAt
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        success:
+          type: boolean
+        inserted:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        updated:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        reconciled:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        duplicates:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        errorMessage:
+          type:
+            - 'null'
+            - string
+        occurredAt:
+          type: string
+          format: date-time
+    TillerProductFactDto:
+      required:
+        - description
+        - quantity
+        - unitPrice
+        - total
+        - store
+        - receiptId
+        - receiptDate
+      type: object
+      properties:
+        description:
+          type: string
+        quantity:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        unitPrice:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        total:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        store:
+          type: string
+        receiptId:
+          type: string
+          format: uuid
+        receiptDate:
+          type: string
+          format: date
+    TillerBasketDto:
+      required:
+        - receiptId
+        - store
+        - date
+        - payment
+      type: object
+      properties:
+        receiptId:
+          type: string
+          format: uuid
+        store:
+          type: string
+        date:
+          type: string
+          format: date
+        payment:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/TillerBasketPaymentDto'
+    TillerStoreRollupDto:
+      required:
+        - store
+        - receiptCount
+        - total
+      type: object
+      properties:
+        store:
+          type: string
+        receiptCount:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        total:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+    TillerUnmatchedTransactionDto:
+      required:
+        - providerTransactionId
+        - date
+        - description
+        - amount
+        - account
+        - category
+      type: object
+      properties:
+        providerTransactionId:
+          type: string
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        account:
+          type: string
+        category:
+          type:
+            - 'null'
+            - string
+    TillerBasketPaymentDto:
+      required:
+        - providerTransactionId
+        - account
+        - date
+        - category
+      type: object
+      properties:
+        providerTransactionId:
+          type: string
+        account:
+          type: string
+        date:
+          type: string
+          format: date
+        category:
+          type:
+            - 'null'
+            - string
 
   headers:
     X-Resource-Id:

@@ -301,6 +301,128 @@ export function authorizeImport(qualified, attestation, context = {}) {
   };
 }
 
+/**
+ * Native release binding predicate (Cadmus ReTag adapter rule).
+ * Decides whether native Paperless evidence authorizes model extraction or
+ * import for the CURRENT source revision. Pure function over native-shaped
+ * inputs; every unproven input fails closed (deny).
+ *
+ * Adapter rule (W27 native-evidence handoff, W27-QA refinement): allow iff
+ *  1. current tags contain the required tag and ReTagged21 (fresh re-read);
+ *  2. no blocked tag present;
+ *  3. a history 21-add has ts STRICTLY after max(currentVersion.added, latestAuditedContentChange[, ocrSettledAt]);
+ *  4. no history 21-remove at/after the authorizing add;
+ *  5. the add actor is in authorizedReleasers (EMPTY under R20 HOLD: deny-all).
+ *
+ * Version floor notes (do not weaken): versions[] covers FILE versions, not
+ * OCR-only revisions. Audited content changes (history entries touching
+ * content/checksum/versions) bind the OCR/content side independently: any such
+ * change at/after the floor voids earlier adds. document.modified is NOT a
+ * floor term — live evidence shows native tag operations advance it to within
+ * milliseconds of the tag event itself, making it indistinguishable from the
+ * authorizing add (self-bump); it is recorded for audit only. A contentHash is
+ * an equality binding, never an operand in the timestamp floor: row selection
+ * uses it, the floor uses timestamps only. Sub-millisecond ordering is
+ * respected exactly as parsed (no rounding: an earlier release is never
+ * promoted into an equal/later authorization). ocrSettledAt is accepted when
+ * supplied (term live and unit-tested); the bridge does not yet supply it —
+ * the strict finalization gate independently enforces settled, written-back
+ * final OCR before extraction. Missing/unparseable version, history, or actor
+ * evidence denies, as does any uninterpretable tag-touching entry.
+ */
+export function evaluateReleaseBinding({ currentTags, history, versions, bridgeContentHash, authorizedReleasers, ocrSettledAt = null, requiredTagId = null, blockedTagIds = [] }) {
+  const deny = (reason) => ({ allow: false, reason });
+  const num = (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : null; };
+  const has21 = (objects) => (Array.isArray(objects) ? objects : []).some((o) => num(o) === 21 || String(o ?? "").toLowerCase() === "retagged");
+  const rawTags = Array.isArray(currentTags) ? currentTags : [];
+  const tags = rawTags.map(num);
+  if (requiredTagId !== null && requiredTagId !== undefined && !tags.includes(Number(requiredTagId))) {
+    return deny("required receipt tag absent on current tags");
+  }
+  if (!has21(rawTags)) return deny("ReTagged21 absent on current tags");
+  const blocked = new Set((blockedTagIds ?? []).map(num).filter((n) => n !== null));
+  if (tags.some((t) => t !== null && blocked.has(t))) return deny("document has an excluded sensitive tag");
+  if (!Array.isArray(history)) return deny("native tag history unavailable");
+  if (!Array.isArray(versions) || versions.length === 0) {
+    return deny("current version identity unavailable (versions[] missing/empty is not proof of absence)");
+  }
+  const want = String(bridgeContentHash ?? "").toLowerCase();
+  let row = null;
+  if (want) {
+    for (const v of versions) {
+      if (typeof v?.checksum === "string" && v.checksum.toLowerCase() === want) { row = v; break; }
+    }
+  }
+  if (!row) {
+    let best = -1;
+    for (const v of versions) {
+      const t = Date.parse(v?.added);
+      if (Number.isFinite(t) && t > best) { best = t; row = v; }
+    }
+  }
+  if (!row) return deny("no usable version record");
+  const versionAdded = Date.parse(row.added);
+  if (!Number.isFinite(versionAdded)) return deny("current version added timestamp unparseable");
+  const floorTerms = [versionAdded];
+  // Independent OCR/content binding from the audit log (not from modified,
+  // which native tag operations advance to within milliseconds of the tag
+  // event itself): any audited content/checksum/versions change at/after the
+  // current floor voids earlier authorizations. An unorderable content change
+  // denies outright, since exclusion cannot be established.
+  let latestContentTs = -1;
+  for (const e of history) {
+    if (!e || typeof e !== "object") continue;
+    const ch = e.changes;
+    if (!ch || typeof ch !== "object") continue;
+    if (!("content" in ch || "checksum" in ch || "versions" in ch)) continue;
+    const t = Date.parse(e.timestamp ?? e.ts);
+    if (!Number.isFinite(t)) return deny("unorderable content change in history");
+    if (t > latestContentTs) latestContentTs = t;
+  }
+  if (latestContentTs >= 0) floorTerms.push(latestContentTs);
+  if (ocrSettledAt !== null && ocrSettledAt !== undefined) {
+    const t = Date.parse(ocrSettledAt);
+    if (!Number.isFinite(t)) return deny("OCR settlement time unparseable");
+    floorTerms.push(t);
+  }
+  const floor = Math.max(...floorTerms);
+  const auth = new Set((Array.isArray(authorizedReleasers) ? authorizedReleasers : []).map(num).filter((n) => n !== null));
+  if (auth.size === 0) return deny("no authorized releasers (R20 HOLD denies all)");
+  const norm = (e) => {
+    if (!e || typeof e !== "object") return { unparseable: true, touchesTags: false };
+    const tagChange = e.changes?.tags ?? null;
+    const touchesTags = tagChange !== undefined && tagChange !== null;
+    const opRaw = tagChange?.operation ?? e.tagsOp;
+    const op = typeof opRaw === "string" ? opRaw.toLowerCase() : null;
+    const rawObjects = tagChange?.objects ?? e.tagsObjects;
+    const objects = Array.isArray(rawObjects) ? rawObjects : null;
+    const actorRaw = e.actor?.id ?? e.actorId;
+    const actor = (actorRaw !== null && typeof actorRaw !== "object") ? num(actorRaw) : null;
+    const ts = Date.parse(e.timestamp ?? e.ts);
+    if (!Number.isFinite(ts) || (op !== "add" && op !== "remove") || objects === null || actor === null) {
+      return { unparseable: true, touchesTags };
+    }
+    return { unparseable: false, touchesTags, ts, op, objects, actor };
+  };
+  const parsed = history.map((e, i) => ({ ...norm(e), action: e?.action ?? null, index: i }));
+  if (parsed.some((n) => n.unparseable && n.touchesTags)) {
+    return deny("uninterpretable tag history entry (cannot exclude a 21 removal)");
+  }
+  const adds = parsed.filter((n) =>
+    !n.unparseable && n.action === "update" && n.op === "add" && has21(n.objects));
+  // Strictly after: an add at the same instant as the floor cannot be ordered
+  // after it, so it authorizes nothing. No rounding of earlier into equal.
+  const bound = adds.filter((n) => n.ts > floor && auth.has(n.actor));
+  if (bound.length === 0) return deny("no authorized 21-add after release floor");
+  const latestBoundTs = Math.max(...bound.map((n) => n.ts));
+  // Same-instant removal denies too: without strict ordering after the add,
+  // continued authorization cannot be established.
+  const removed = parsed.some((n) =>
+    !n.unparseable && n.action === "update" && n.op === "remove" && has21(n.objects) && n.ts >= latestBoundTs);
+  if (removed) return deny("21 removed at/after authorizing add");
+  return { allow: true, reason: "authorized 21-add covers current version", floor, versionAdded, qualifyingAdds: bound.length };
+}
+
 export function stableSourceRequestId(instance, paperlessId) {
   // RFC 4122 variant/version 5-compatible shape from a stable SHA-256 prefix.
   const hex = createHash("sha256").update("atlas-receipt-v1\0" + instance + "\0" + String(paperlessId)).digest("hex");
@@ -348,6 +470,36 @@ async function jsonResponse(response, service) {
   return JSON.parse(text);
 }
 
+export async function fetchNativeHistory(fetcher, config, rawDocumentId) {
+  // Native tag-history read for release binding. The installed endpoint
+  // returns a COMPLETE newest-first bare array (verified live: page_size is
+  // ignored, all entries returned). That verified shape is the ONLY accepted
+  // one: any paginated/envelope wrapper (count/next/previous/results) is
+  // partial-or-ambiguous by construction — a revocation could hide on an
+  // unfetched page — so wrappers are denied outright rather than trusted
+  // piecemeal, and no next link is ever followed. Oversized arrays deny too.
+  // Any absence, non-2xx status, shape deviation, or cap breach throws, and
+  // every caller treats that as evidence-unavailable (fail closed, hold).
+  // Do not loosen this to guess other paths or shapes without a verified
+  // installed-contract update.
+  const MAX_HISTORY_ENTRIES = 5000;
+  const documentId = Number(rawDocumentId);
+  if (!Number.isSafeInteger(documentId) || documentId < 1) throw new Error("Invalid Paperless ID");
+  const url = apiUrl(config.paperlessUrl, "/api/documents/" + documentId + "/history/");
+  const response = await fetcher(url, {
+    method: "GET", headers: { Authorization: "Token " + config.paperlessToken, Accept: "application/json" },
+    redirect: "error", signal: AbortSignal.timeout(15000)
+  });
+  const body = await jsonResponse(response, "Paperless");
+  if (!Array.isArray(body)) {
+    throw new Error("Native history wrapper not accepted: partial or ambiguous page set denied");
+  }
+  if (body.length > MAX_HISTORY_ENTRIES) {
+    throw new Error("Native history exceeds safe bounds (" + body.length + " entries)");
+  }
+  return body;
+}
+
 export async function getPaperlessText(fetcher, config, rawDocumentId) {
   const documentId = Number(rawDocumentId);
   if (!Number.isSafeInteger(documentId) || documentId < 1) throw new Error("Invalid Paperless ID");
@@ -360,10 +512,22 @@ export async function getPaperlessText(fetcher, config, rawDocumentId) {
   if (Number(d?.id) !== documentId) throw new Error("Paperless returned unexpected document ID");
   const tags = Array.isArray(d.tags) ? d.tags.map(Number) : d.tags;
   if (!Array.isArray(tags) || !tags.includes(Number(config.requiredTagId))) throw new Error("Required receipt-analysis tag absent");
+  // Separate release authority: the required tag marks a candidate, but
+  // intake/model work additionally requires the separately authorized release
+  // tag (ReTagged21) on the CURRENT document version. AIReviewed16 /
+  // ShadowProcessed22 alone never satisfy this. When releaseTagId is
+  // unconfigured the bridge keeps legacy contract-test behavior; live
+  // activation must set ATLAS_PAPERLESS_RELEASE_TAG_ID (W20 config).
+  if (config.releaseTagId !== undefined && config.releaseTagId !== null) {
+    if (!Number.isSafeInteger(Number(config.releaseTagId)) || Number(config.releaseTagId) < 1) throw new Error("Invalid release tag configuration");
+    if (!tags.includes(Number(config.releaseTagId))) throw new Error("Release tag absent: document is not authorized for intake (ReTagged required)");
+  }
   if (tags.some(tag => (config.blockedTagIds ?? []).map(Number).includes(tag))) throw new Error("Document has an excluded sensitive tag");
   if (typeof d.content !== "string" || d.content.trim().length < 20) throw new Error("Document OCR content is not ready");
   if (d.content.length > 100000) throw new Error("OCR text exceeds input limit");
-  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex"), tags };
+  // versions[] rides through raw when present (native retrieve shape); the
+  // release predicate validates it strictly and treats absence as unproven.
+  return { id: d.id, modified: d.modified, content: d.content, contentHash: createHash("sha256").update(d.content).digest("hex"), tags, versions: Array.isArray(d.versions) ? d.versions : null };
 }
 
 export function classifyRoutes(rawTags, config) {
@@ -479,6 +643,17 @@ async function paperlessAiSettled(fetcher, config, rawDocumentId) {
     const queued = Array.isArray(st?.queuedDocumentIds) ? st.queuedDocumentIds : [];
     if (queued.map(Number).includes(documentId)) {
       return { settled: false, reason: "Paperless-AI has document " + documentId + " queued" };
+    }
+    // P4 numeric queue guard (W20 composition port): the native bare
+    // count is unattributed. Any positive count means backend work is
+    // pending that cannot be assigned to this document, so finality is
+    // unproven and the gate fails closed with zero model calls. Missing
+    // or non-numeric counts are never normalized to pass or fail here;
+    // they flow to the OCR/history proof below, which fails closed
+    // on its own when evidence is absent.
+    const nativeQueued = Number(st?.queued);
+    if (Number.isFinite(nativeQueued) && nativeQueued > 0) {
+      return { settled: false, reason: "Paperless-AI reports " + nativeQueued + " unattributed queued document(s); finality unproven without attribution" };
     }
     // Installed Paperless-AI native contract (read-only verified 2026-11-21
     // against history.getHistory + ocr.getDocumentsById): completion is an
