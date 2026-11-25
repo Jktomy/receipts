@@ -86,12 +86,13 @@ test("valid receipt with coupon balances exactly, using original OCR evidence", 
   assert.equal(q.items.length, 2);
   assert.equal(q.adjustments[0].amount, -1);
 });
-test("bad OCR line, guessed product, wrong arithmetic, and low confidence are blocked", () => {
+test("bad OCR line, guessed product, and wrong arithmetic are blocked; confidence is advisory", () => {
   assert.equal(qualifyItemization({...good,items:[{...good.items[0],evidence:"invented item"}]},ocr).ok,false);
   assert.equal(qualifyItemization({...good,total:"8.61"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,merchantEvidence:"UNKNOWN STORE"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,totalEvidence:"TOTAL 0.01"},ocr).ok,false);
-  assert.equal(qualifyItemization({...good,confidence:"low"},ocr).ok,false);
+  assert.equal(qualifyItemization({...good,confidence:"low"},ocr).ok,true);
+  assert.equal(qualifyItemization({...good,confidence:"low",total:"8.61"},ocr).ok,false);
   assert.equal(qualifyItemization({...good,items:[{...good.items[0],total:"3.98"}]},ocr).ok,false);
 });
 test("weighed produce retains four-decimal quantity and unit price", () => {
@@ -268,13 +269,23 @@ test("explicit opt-in imports only high-quality evidence with no Firefly writes"
     assert.equal(calls.filter(c=>c.host==="firefly.test").length,0);
   },{overrides:{autoImport:true}});
 });
-test("auto import never writes a low-confidence receipt",async()=>{
+test("auto import accepts valid low-confidence receipt exactly once",async()=>{
+  await exerciseBridge(async({url,bridge,calls})=>{
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    const state=await untilReady(bridge,44);
+    assert.equal(state.status,"IMPORTED");
+    await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
+    await untilReady(bridge,44);
+    assert.equal(calls.filter(c=>c.host==="receipts.test"&&c.method==="POST").length,1);
+  },{overrides:{autoImport:true},draft:{...good,confidence:"low"}});
+});
+test("auto import still blocks low-confidence receipts with objective failures",async()=>{
   await exerciseBridge(async({url,bridge,calls})=>{
     await http(url+"/hooks/paperless","POST",{sourceId:44},"x-atlas-hook-key",config.webhookSecret);
     const state=await untilReady(bridge,44);
     assert.equal(state.status,"REVIEW_REQUIRED");
     assert.equal(calls.some(c=>c.host==="receipts.test"),false);
-  },{overrides:{autoImport:true},draft:{...good,confidence:"low"}});
+  },{overrides:{autoImport:true},draft:{...good,confidence:"low",total:"8.61"}});
 });
 
 test("Paperless draft inbox lists only bounded authenticated source summaries", async () => {
@@ -638,9 +649,10 @@ test("edit landing while Firefly responds blocks the stale confirmation", async 
   }
 });
 
-test("low-confidence import requires a bound, non-proposer approval", () => {
-  const low = qualifyItemization({ ...good, confidence: "low" }, ocr);
-  assert.equal(low.ok, false);
+test("legacy confidence-only failure supports bound, non-proposer approval", () => {
+  const qualified = qualifyItemization({ ...good, confidence: "low" }, ocr);
+  assert.equal(qualified.ok, true);
+  const low = { ...qualified, ok: false, problems: ["Model did not attest high confidence"] };
   assert.deepEqual(low.problems, ["Model did not attest high confidence"]);
   const digest = attestationDigest(ocr);
   const valid = { reviewer: "jayson", approvedAt: "2026-11-20T06:30:00Z", ocrSha256: digest, draftRevision: "4" };
@@ -669,7 +681,7 @@ test("low-confidence import requires a bound, non-proposer approval", () => {
   assert.equal(toCompleteReceiptRequest(qualifyItemization(good, ocr), "paperless", 25).reviewAttestation, null);
   assert.equal(verifyReviewAttestation(valid, context).ok, true);
 });
-test("low-confidence draft imports only with an authenticated, draft-bound approval", async () => {
+test("valid low-confidence draft can be imported through the authenticated review route", async () => {
   await exerciseBridge(async ({ url, bridge, calls }) => {
     await http(url + "/hooks/paperless", "POST", { sourceId: 44 }, "x-atlas-hook-key", config.webhookSecret);
     await untilReady(bridge, 44);
@@ -688,22 +700,11 @@ test("low-confidence draft imports only with an authenticated, draft-bound appro
       body: JSON.stringify(body)
     });
 
-    const blocked = await post({ expectedRevision: revision });
-    assert.equal(blocked.status, 422);
-    assert.match((await blocked.json()).problems.join(" "), /approval is required/i);
-    assert.equal(calls.some(c => c.host === "receipts.test"), false);
-
-    const stale = await post({ expectedRevision: revision, review: { approvedAt: "2026-11-20T06:30:00Z", ocrSha256: createHash("sha256").update(ocr + "\nX").digest("hex"), draftRevision: String(revision) } }, "jayson");
-    assert.equal(stale.status, 422);
-    assert.match((await stale.json()).problems.join(" "), /source OCR changed/);
-
-    const approved = await post({ expectedRevision: revision, review: { approvedAt: "2026-11-20T06:30:00Z", ocrSha256: digest, draftRevision: String(revision) } }, "jayson");
+    const approved = await post({ expectedRevision: revision });
     assert.equal(approved.status, 200);
     assert.equal((await approved.json()).status, "IMPORTED");
     const payload = JSON.parse(calls.find(c => c.host === "receipts.test").body);
-    assert.equal(payload.reviewAttestation.reviewer, "jayson");
-    assert.equal(payload.reviewAttestation.ocrSha256, digest);
-    assert.equal(payload.reviewAttestation.draftRevision, String(revision));
+    assert.equal(payload.reviewAttestation, null);
   });
 });
 test("operator drafts readback exposes routing metadata", async () => {

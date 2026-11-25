@@ -339,9 +339,8 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       // The native source read above enforces the current destination tag,
       // protected exclusions, and the exact observed OCR/file revision.
       const qualified = qualifyItemization(saved.draft, current.content);
-      // A low-confidence extraction is importable only with an approval bound to
-      // this draft revision and this exact OCR text, from a reviewer distinct
-      // from the proposing model. Structural findings never become importable.
+      // Confidence is advisory. Legacy attestation compatibility remains;
+      // structural findings never become importable by review approval.
       const decision = authorizeImport(qualified, approval, {
         ocrText: current.content,
         draftRevision: String(saved.draftRevision ?? ""),
