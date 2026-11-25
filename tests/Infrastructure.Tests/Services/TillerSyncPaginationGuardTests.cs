@@ -79,6 +79,20 @@ public class TillerSyncPaginationGuardTests
 	}
 
 	[Fact]
+	public async Task SyncFull_RepeatedIdAcrossDifferentPages_ThrowsBeforeCacheWrites()
+	{
+		var pages = new Queue<TillerTransactionPage>([
+			Page([Row("t-1", "2026-10-01"), Row("t-2", "2026-10-02")], true, 3),
+			Page([Row("t-1", "2026-10-03")], false, 3),
+		]);
+
+		Func<Task> act = () => CreateService(pages).SyncFullAsync(CancellationToken.None);
+		await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*repeated a transaction ID*");
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerTransactionEntity>().CountAsync()).Should().Be(0);
+	}
+
+	[Fact]
 	public async Task SyncFull_MissingTotal_Throws()
 	{
 		var pages = new Queue<TillerTransactionPage>([

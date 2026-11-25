@@ -98,6 +98,7 @@ public class TillerSyncService(
 		int pageSize = Math.Clamp(_options.DefaultPageSize, 1, _options.MaxPageSize);
 		int? expectedTotal = null;
 		HashSet<string> seenPageFingerprints = new(StringComparer.Ordinal);
+		Dictionary<string, TillerTransactionRow> sourceRows = new(StringComparer.Ordinal);
 
 		try
 		{
@@ -158,13 +159,15 @@ public class TillerSyncService(
 
 				foreach (TillerTransactionRow row in page.Rows)
 				{
-					switch (await UpsertAsync(spreadsheetId, row, cancellationToken))
+					if (string.IsNullOrWhiteSpace(row.TransactionId) || IsPlaceholderId(row.TransactionId))
 					{
-						case UpsertOutcome.Inserted: inserted++; break;
-						case UpsertOutcome.Updated: updated++; break;
-						case UpsertOutcome.Reconciled: reconciled++; break;
-						case UpsertOutcome.Duplicate: duplicates++; break;
-						case UpsertOutcome.Invalid: invalid++; break;
+						invalid++;
+						continue;
+					}
+
+					if (!sourceRows.TryAdd(row.TransactionId, row))
+					{
+						throw new InvalidOperationException("Tiller repeated a transaction ID within one scan; refusing ambiguous source data.");
 					}
 
 					if (maxDate is null || row.Date > maxDate)
@@ -172,8 +175,6 @@ public class TillerSyncService(
 						maxDate = row.Date;
 					}
 				}
-
-				await SaveCheckpointAsync(spreadsheetId, maxDate, completed: !page.Truncated, cancellationToken);
 
 				if (!page.Truncated)
 				{
@@ -186,6 +187,22 @@ public class TillerSyncService(
 					break;
 				}
 			}
+			// Only accept rows after the complete paginated read passes its guards.
+			// No inferred merging or destructive handling of missing source IDs.
+			await SaveCheckpointAsync(spreadsheetId, maxDate, completed: false, cancellationToken);
+			foreach (TillerTransactionRow row in sourceRows.Values)
+			{
+				switch (await UpsertAsync(spreadsheetId, row, cancellationToken))
+				{
+					case UpsertOutcome.Inserted: inserted++; break;
+					case UpsertOutcome.Updated: updated++; break;
+					case UpsertOutcome.Reconciled: reconciled++; break;
+					case UpsertOutcome.Duplicate: duplicates++; break;
+					case UpsertOutcome.Invalid: invalid++; break;
+				}
+			}
+
+			await SaveCheckpointAsync(spreadsheetId, maxDate, completed: true, cancellationToken);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{

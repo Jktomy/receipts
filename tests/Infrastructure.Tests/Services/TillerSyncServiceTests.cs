@@ -108,7 +108,6 @@ public class TillerSyncServiceTests
 		_rows.Add(Row("p-1", "2026-11-06", "WHOLEFDS MKT", -15.00m, status: "pending"));
 		TillerSyncService service = CreateService();
 		await service.SyncFullAsync(CancellationToken.None);
-		_rows.Clear();
 		_rows.Add(Row("t-9", "2026-11-06", "WHOLEFDS MKT", -15.00m, status: "posted"));
 
 		// Act
@@ -228,9 +227,10 @@ public class TillerSyncServiceTests
 			_factory, _clientMock.Object, _selectionMock.Object,
 			new Tiller.TillerClientOptions { DefaultPageSize = 1, MaxPageSize = 500 });
 
-		// Act: first attempt fails partway; retry with a healthy transport completes.
+		// Act: failed source scan writes no transaction rows; retry completes.
 		Func<Task> failing = () => service.SyncFullAsync(CancellationToken.None);
 		await failing.Should().ThrowAsync<HttpRequestException>();
+		(await CanonicalCountAsync()).Should().Be(0);
 		_clientMock.Setup(c => c.QueryTransactionsAsync(
 				It.IsAny<string>(), It.IsAny<TillerTransactionQuery>(), It.IsAny<CancellationToken>()))
 			.ReturnsAsync((string _, TillerTransactionQuery query, CancellationToken _) =>
