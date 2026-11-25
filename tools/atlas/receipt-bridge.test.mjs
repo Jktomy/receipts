@@ -8,7 +8,7 @@ import {
   moneyCents, quantityTenThousandths, unitPriceTenThousandths, qualifyItemization, stableSourceRequestId,
   toCompleteReceiptRequest, getPaperlessText, extractUsingOpenLyric, sanitizePurchaseDraft,
   getFireflyWithdrawals, suggestFireflyLink, normalizeUnit, canonicalUnits, dimensionOfUnit,
-  attestationDigest, verifyReviewAttestation, authorizeImport
+  attestationDigest, verifyReviewAttestation, authorizeImport, repairOrdinaryDraftFormatting
 } from "./receipt-bridge-core.mjs";
 import { createAtlasBridge } from "./receipt-bridge-server.mjs";
 
@@ -778,4 +778,50 @@ test("printed total must match exact cents rather than a prefix of another amoun
   assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.61"},text).ok,false);
   assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.6"},text).ok,false);
   assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.60"},ocr).ok,true);
+});
+
+
+test("strict intake formatting recovery preserves exact evidence and no extra tax", () => {
+  const source = "RIDE SERVICE 11/18/2026\nRide fare\n$4.00\nService fee\n$1.00\nTOTAL $5.00";
+  const draft = sanitizePurchaseDraft({
+    merchant:"Ride Service", merchantEvidence:"RIDE SERVICE", date:"2026-11-18",
+    dateEvidence:"11/18/2026", total:"5.00", totalEvidence:"$5.00", tax:"", currency:"USD",
+    confidence:"high", items:[
+      {description:"Ride fare", evidence:"Ride fare\n$4.00", quantity:"1", unitPrice:"4.00", total:"4.00"},
+      {description:"Service fee", evidence:"Service fee\n$1.00", quantity:"1", unitPrice:"1.00", total:"1.00"}
+    ], adjustments:[]
+  });
+  assert.equal(qualifyItemization(draft,source).ok,false);
+  const repaired = repairOrdinaryDraftFormatting(draft,source);
+  assert.equal(repaired.tax,"0.00");
+  assert.equal(repaired.items[0].evidence,"Ride fare");
+  assert.equal(repaired.items[1].evidence,"Service fee");
+  assert.equal(qualifyItemization(repaired,source).ok,true);
+  assert.equal(draft.tax,"");
+  assert.equal(draft.items[0].evidence,"Ride fare\n$4.00");
+  for (const [bad,text] of [
+    [{...draft,total:"6.00"},source.replace("TOTAL $5.00","TOTAL $6.00")],
+    [draft,source+"\nTAX"],
+    [{...draft,date:""},source],
+    [{...draft,hasRefunds:true},source],
+    [{...draft,items:[{...draft.items[0],evidence:"Ride fare\n$9.00"},draft.items[1]]},source],
+    [{...draft,items:[{...draft.items[0],evidence:"Ride fare\n$1.00"},draft.items[1]]},source]
+  ]) assert.equal(repairOrdinaryDraftFormatting(bad,text),bad);
+});
+
+test("strict automatic intake repairs only qualifying formatting and imports once", async () => {
+  const source = "RIDE SERVICE 11/18/2026\nRide fare\n$5.00\nTOTAL $5.00";
+  const draft = {merchant:"Ride Service",merchantEvidence:"RIDE SERVICE",date:"2026-11-18",
+    dateEvidence:"11/18/2026",total:"5.00",totalEvidence:"TOTAL $5.00",tax:"",
+    currency:"USD",confidence:"high",items:[{description:"Ride fare",evidence:"Ride fare\n$5.00",
+    quantity:"1",unitPrice:"5.00",total:"5.00"}],adjustments:[]};
+  await exerciseBridge(async ({bridge,calls}) => {
+    await bridge.processDocument(44);
+    assert.equal(bridge.state(44).status,"IMPORTED");
+    assert.equal(bridge.state(44).draft.tax,"0.00");
+    assert.equal(bridge.state(44).draft.items[0].evidence,"Ride fare");
+    await bridge.processDocument(44);
+    assert.equal(calls.filter(c=>c.host==="receipts.test").length,1);
+    assert.equal(calls.filter(c=>c.host==="oathgate.test").length,1);
+  },{draft,document:{content:source},overrides:{autoImport:true,finalizationMode:"strict",finalizationIntervalMs:0,finalizationMaxAttempts:2,finalizationStableReads:2}});
 });
