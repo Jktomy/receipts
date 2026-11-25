@@ -192,16 +192,24 @@ public class TillerController(
 		CancellationToken cancellationToken)
 	{
 		string? allowed = configuration["TILLER_EXECUTOR_SPREADSHEET_ID"];
-		if (string.IsNullOrWhiteSpace(allowed)) return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
-		if (!string.Equals(allowed, request.SpreadsheetId, StringComparison.Ordinal) || request.Rows is null)
-			return ApiProblem.BadRequest("Snapshot source is not the approved spreadsheet.");
+		if (string.IsNullOrWhiteSpace(allowed))
+		{
+			return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
+		}
+		if (!string.Equals(allowed, request.SpreadsheetId, StringComparison.Ordinal) || request.Rows is null || request.Rows.Any(r => r is null))
+		{
+			return ApiProblem.BadRequest("Snapshot source is not the approved spreadsheet or contains invalid rows.");
+		}
 		try
 		{
 			var rows = request.Rows.Select(r => new TillerTransactionRow(r.TransactionId, r.Date, r.Description,
 				r.Amount, r.Category, r.Account, r.Institution, r.Status, r.SplitGroupId)).ToList();
 			return TypedResults.Ok(mapper.ToSyncResultDto(await sync.ImportExecutorSnapshotAsync(allowed, request.Total, rows, cancellationToken)));
 		}
-		catch (InvalidOperationException) { return ApiProblem.BadRequest("Snapshot rejected; check source count, IDs, and sync status."); }
+		catch (InvalidOperationException)
+		{
+			return ApiProblem.BadRequest("Snapshot rejected; check source count, IDs, and sync status.");
+		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			logger.LogWarning("Executor snapshot import failed.");
