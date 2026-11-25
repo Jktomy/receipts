@@ -101,6 +101,11 @@ public class TillerReceiptCatalog(
 			return null;
 		}
 
+		List<AdjustmentEntity> adjustments = await context.Set<AdjustmentEntity>()
+			.AsNoTracking()
+			.Where(a => a.ReceiptId == receipt.Id && a.DeletedAt == null)
+			.ToListAsync(cancellationToken);
+
 		return new TillerReceiptSnapshot(
 			receipt.Id,
 			receipt.Location,
@@ -108,10 +113,8 @@ public class TillerReceiptCatalog(
 			items.Sum(i => i.TotalAmount),
 			items.All(i => i.NormalizationReviewState == NormalizationReviewState.Verified),
 			receipt.TaxAmount,
-			await context.Set<AdjustmentEntity>()
-				.AsNoTracking()
-				.Where(a => a.ReceiptId == receipt.Id && a.Type == AdjustmentType.Tip && a.DeletedAt == null)
-				.SumAsync(a => (decimal?)a.Amount) ?? 0m,
-			receipt.TaxUnknown);
+			adjustments.Where(a => a.Type == AdjustmentType.Tip).Sum(a => a.Amount),
+			receipt.TaxUnknown,
+			adjustments.Where(a => a.Type != AdjustmentType.Tip).Sum(a => a.Amount));
 	}
 }

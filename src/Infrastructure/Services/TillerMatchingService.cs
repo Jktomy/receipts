@@ -402,7 +402,7 @@ public class TillerMatchingService(
 			return null;
 		}
 
-		if (receipt.Total != -txn.Amount)
+		if (receipt.TaxUnknown || receipt.ExpectedTotal != -txn.Amount)
 		{
 			return null;
 		}
@@ -412,9 +412,9 @@ public class TillerMatchingService(
 
 	// Merchant + date window only (no amount comparison): shared by exact
 	// matches and tip hypotheses so both use identical identity evidence.
-	private static int? MatchWindow(string merchant, DateOnly date, TillerTransactionEntity txn)
+	private static int? MatchWindow(string merchant, DateOnly date, TillerTransactionEntity txn, bool allowTruncated = false)
 	{
-		if (!MerchantMatches(merchant, txn.Description))
+		if (!MerchantMatches(merchant, txn.Description) && !(allowTruncated && TruncatedMerchantMatches(merchant, txn.Description)))
 		{
 			return null;
 		}
@@ -439,7 +439,7 @@ public class TillerMatchingService(
 			return false;
 		}
 
-		decimal @base = receipt.Total + receipt.TaxTotal;
+		decimal @base = receipt.ExpectedTotal;
 		if (@base <= 0m)
 		{
 			return false;
@@ -451,7 +451,7 @@ public class TillerMatchingService(
 			return false;
 		}
 
-		if (!MatchWindow(receipt.Merchant, receipt.Date, txn).HasValue)
+		if (!MatchWindow(receipt.Merchant, receipt.Date, txn, allowTruncated: true).HasValue)
 		{
 			return false;
 		}
@@ -482,7 +482,7 @@ public class TillerMatchingService(
 			}
 
 			if (TryPossibleTip(receipt, txn, out decimal tip)
-				&& MatchWindow(receipt.Merchant, receipt.Date, txn) is int days)
+				&& MatchWindow(receipt.Merchant, receipt.Date, txn, allowTruncated: true) is int days)
 			{
 				tips.Add((receipt.ReceiptId, days, tip));
 			}
@@ -553,7 +553,7 @@ public class TillerMatchingService(
 				continue;
 			}
 
-			if (MatchWindow(receipt.Merchant, receipt.Date, other) is int days)
+			if (MatchWindow(receipt.Merchant, receipt.Date, other, allowTruncated: true) is int days)
 			{
 				contenders.Add(new TillerMatchCandidate(receiptId, other.ProviderTransactionId, days));
 			}
@@ -593,6 +593,38 @@ public class TillerMatchingService(
 
 		HashSet<string> txnTokens = [.. Tokens(txnDescription)];
 		return receiptTokens.All(txnTokens.Contains);
+	}
+
+	// Payment processors may remove apostrophes and cut off the last merchant
+	// word before appending a location. Permit that only for a human-reviewed
+	// possible tip, never for an automatic exact link. Require three complete
+	// consecutive merchant words and a matching prefix of the final word.
+	private static bool TruncatedMerchantMatches(string merchant, string description)
+	{
+		List<string> expected = Tokens(merchant.Replace("'", "").Replace("’", ""));
+		List<string> actual = Tokens(description.Replace("'", "").Replace("’", ""));
+		if (expected.Count < 4 || expected[0].Length < 4 || actual.Count < expected.Count + 1)
+		{
+			return false;
+		}
+
+		// Explicit processor prefixes only; avoid arbitrary substring matches.
+		if (actual[0] != "tst" && actual[0] != "sq")
+		{
+			return false;
+		}
+
+		for (int i = 0; i < expected.Count - 1; i++)
+		{
+			if (expected[i] != actual[i + 1])
+			{
+				return false;
+			}
+		}
+
+		string last = actual[expected.Count];
+		return last.Length < expected[^1].Length
+			&& expected[^1].StartsWith(last, StringComparison.Ordinal);
 	}
 
 	private static List<string> Tokens(string? value)

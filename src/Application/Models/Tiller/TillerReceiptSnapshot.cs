@@ -10,7 +10,12 @@ public sealed record TillerReceiptSnapshot(
 	bool AllItemsVerified,
 	decimal TaxTotal = 0m,
 	decimal TipTotal = 0m,
-	bool TaxUnknown = false);
+	bool TaxUnknown = false,
+	decimal OtherAdjustmentTotal = 0m)
+{
+	// Total is the stored item subtotal, not the payment amount.
+	public decimal ExpectedTotal => Total + TaxTotal + TipTotal + OtherAdjustmentTotal;
+}
 
 // One human-verified line item. Only lines from all-verified receipts are
 // ever returned; product facts come exclusively from these rows.
