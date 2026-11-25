@@ -47,6 +47,29 @@ function normalizeDescription(v) {
   return v.normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
+// Evidence is source text, not a display description. Do not collapse internal whitespace.
+function literalEvidence(value) {
+  return typeof value === "string" && !/[\r\n]/.test(value) ? value.trim() : "";
+}
+
+// Compare exact monetary tokens at their original OCR boundaries.
+function printedTotalMatches(raw, ocrText) {
+  const evidence = literalEvidence(raw.totalEvidence);
+  if (!evidence) return false;
+  let expected;
+  try { expected = moneyCents(raw.total, { allowZero: false }); } catch { return false; }
+  const tokens = [...evidence.matchAll(/(?<![\d.,-])-?\d+(?:\.\d{1,2})?(?![\d.,])/g)].filter(m => {
+    try { return moneyCents(m[0]) === expected; } catch { return false; }
+  });
+  for (let start = ocrText.indexOf(evidence); start >= 0; start = ocrText.indexOf(evidence, start + 1)) {
+    if (tokens.some(m => {
+      const at = start + m.index;
+      return !/[\d.,-]/.test(ocrText[at - 1] ?? "") && !/[\d.,]/.test(ocrText[at + m[0].length] ?? "");
+    })) return true;
+  }
+  return false;
+}
+
 const allowedAdjustments = new Set(["tip", "discount", "rounding", "loyaltyRedemption", "coupon", "storeCredit", "other"]);
 const debitAdjustments = new Set(["discount", "loyaltyRedemption", "coupon", "storeCredit"]);
 
@@ -112,9 +135,9 @@ export function sanitizePurchaseDraft(raw) {
     merchantEvidence: pick(raw.merchantEvidence),
     date: pick(raw.date, 10),
     dateEvidence: pick(raw.dateEvidence),
-    total: pick(raw.total, 30),
+    total: pickAmount(raw.total, 30),
     totalEvidence: pick(raw.totalEvidence),
-    tax: pick(raw.tax ?? "0", 30),
+    tax: pickAmount(raw.tax ?? "0", 30),
     currency: pick(raw.currency ?? "USD", 3),
     confidence: pick(raw.confidence, 10),
     hasRefunds: raw.hasRefunds === true,
@@ -123,13 +146,13 @@ export function sanitizePurchaseDraft(raw) {
       description: pick(item?.description, 200), sku: pick(item?.sku, 80),
       evidence: pick(item?.evidence, 300),
       quantity: pickAmount(item?.quantity, 30),
-      unitPrice: pick(item?.unitPrice, 30), total: pick(item?.total, 30),
+      unitPrice: pickAmount(item?.unitPrice, 30), total: pickAmount(item?.total, 30),
       unit: pick(item?.unit, 16),
       packageContentQuantity: pickAmount(item?.packageContentQuantity, 30),
       packageContentUnit: pick(item?.packageContentUnit, 16)
     })) : [],
     adjustments: Array.isArray(raw.adjustments) ? raw.adjustments.slice(0, 40).map(adjustment => ({
-      type: pick(adjustment?.type, 30), amount: pick(adjustment?.amount, 30),
+      type: pick(adjustment?.type, 30), amount: pickAmount(adjustment?.amount, 30),
       description: pick(adjustment?.description, 200)
     })) : []
   };
@@ -143,10 +166,10 @@ export function qualifyItemization(raw, ocrText) {
   if (!acceptedDate(raw.date)) problems.push("Date missing or invalid");
   if (String(raw.currency ?? "USD").toUpperCase() !== "USD") problems.push("Currency needs review");
   for (const field of ["merchantEvidence", "dateEvidence", "totalEvidence"]) {
-    const evidence = normalizeDescription(raw[field]);
+    const evidence = literalEvidence(raw[field]);
     if (!evidence || !ocrText.includes(evidence)) problems.push("Missing printed " + field);
   }
-  if (typeof raw.totalEvidence === "string" && !raw.totalEvidence.includes(String(raw.total ?? ""))) {
+  if (!printedTotalMatches(raw, ocrText)) {
     problems.push("Printed total evidence does not contain extracted total");
   }
   let total = 0n, tax = 0n, subtotal = 0n, adjustmentTotal = 0n;
@@ -177,7 +200,7 @@ export function qualifyItemization(raw, ocrText) {
       continue;
     }
     if (!description) problems.push("An item description is missing");
-    const source = normalizeDescription(rawItem?.evidence);
+    const source = literalEvidence(rawItem?.evidence);
     // Requiring a literal OCR evidence substring avoids invented products.
     if (!source || !ocrText.toLowerCase().includes(source.toLowerCase())) {
       problems.push("Item lacks verbatim source evidence");
