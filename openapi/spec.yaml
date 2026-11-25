@@ -5280,6 +5280,12 @@ paths:
               $ref: "#/components/headers/X-Resource-Id"
         "404":
           description: Not Found
+        "409":
+          description: Revision or provenance conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
   /api/receipts:
     get:
@@ -5614,6 +5620,12 @@ paths:
           description: No Content
         "404":
           description: Not Found
+        "409":
+          description: Revision or provenance conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
   # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Receipt Items
@@ -7101,6 +7113,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreateApiKeyResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
   /api/apikeys/{id}:
     delete:
@@ -8713,6 +8731,47 @@ paths:
         '503':
           description: Service Unavailable
       operationId: Tiller_Sync
+  /api/tiller/executor-snapshot:
+    post:
+      tags:
+        - Tiller
+      summary: Import an Executor-supplied Tiller snapshot
+      description: >-
+        Accepts a complete read-only Treasury scan supplied by Executor. Disabled unless the deployment binds the one approved source
+        spreadsheet; rejects other sources. Creates no scheduler, worker, or upstream writes.
+      parameters:
+        - name: api-version
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutorSnapshotRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/ExecutorSnapshotRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/ExecutorSnapshotRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TillerSyncResultDto'
+        '400':
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '503':
+          description: Service Unavailable
+      operationId: Tiller_ImportExecutorSnapshot
   /api/tiller/transactions:
     get:
       tags:
@@ -16720,6 +16779,54 @@ components:
       type: string
       enum: [default, receipt, item, historical]
       description: "Why an item carries its envelope: its item type's default, the receipt's paid-from envelope, a per-item override, or the historical backfill. Only default-sourced (or unresolved) envelopes follow item-type changes."
+
+    ExecutorSnapshotRequest:
+      type: object
+      required: [spreadsheetId, total, rows]
+      properties:
+        spreadsheetId:
+          type: string
+        total:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+            - integer
+            - string
+          format: int32
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutorSnapshotRow'
+    ExecutorSnapshotRow:
+      type: object
+      required: [transactionId, date, description, amount, category, account, institution, status, splitGroupId]
+      properties:
+        transactionId:
+          type: string
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          pattern: ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
+          type:
+            - number
+            - string
+          format: double
+        category:
+          type:
+            - 'null'
+            - string
+        account:
+          type: string
+        institution:
+          type: string
+        status:
+          type: string
+        splitGroupId:
+          type:
+            - 'null'
+            - string
 
     ItemTypeEnvelopeDefaultResponse:
       type: object

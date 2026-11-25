@@ -16,7 +16,6 @@ namespace API.Controllers;
 [ApiVersion("1.0")]
 [ApiController]
 [Route("api/apikeys")]
-[Produces("application/json")]
 [Authorize]
 [EnableRateLimiting("api-key")]
 public class ApiKeyController(

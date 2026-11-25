@@ -183,6 +183,7 @@ public class TillerController(
 	// Executor supplies the complete read-only Treasury scan. Disabled unless
 	// the deployment explicitly binds the one approved source spreadsheet.
 	[HttpPost("executor-snapshot")]
+	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
 	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
 	[RequestSizeLimit(20000000)]
 	public async Task<Results<Ok<TillerSyncResultDto>, BadRequestProblem, StatusCodeHttpResult>> ImportExecutorSnapshot(
