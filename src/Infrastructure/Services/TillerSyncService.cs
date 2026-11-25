@@ -49,6 +49,43 @@ public class TillerSyncService(
 		}
 	}
 
+	// Executor owns the renewable Tiller connection. Accept a full, validated
+	// snapshot from the authorized local caller, using the same identity guards.
+	public async Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total,
+		IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken)
+	{
+		if (total < 0 || total != rows.Count || rows.Count > 50000 || rows.Any(r => r is null
+			|| string.IsNullOrWhiteSpace(r.TransactionId) || IsPlaceholderId(r.TransactionId)
+			|| r.Date == default || r.Description is null || r.Account is null || r.Institution is null
+			|| string.IsNullOrWhiteSpace(r.Status)))
+			throw new InvalidOperationException("Incomplete or invalid Executor snapshot; no import accepted.");
+		if (rows.Select(r => r.TransactionId).Distinct(StringComparer.Ordinal).Count() != total)
+			throw new InvalidOperationException("Repeated source transaction ID; no import accepted.");
+		await SyncGate.WaitAsync(cancellationToken);
+		try
+		{
+			string? selected = await selectionService.GetSelectedSpreadsheetIdAsync(cancellationToken);
+			if (selected is not null && !string.Equals(selected, spreadsheetId, StringComparison.Ordinal))
+				throw new InvalidOperationException("Executor snapshot differs from selected spreadsheet.");
+			TillerSyncResult result = await RunAsync(spreadsheetId, TillerSyncEventType.Full, null, cancellationToken, rows);
+			if (selected is null)
+			{
+				await using ApplicationDbContext context = contextFactory.CreateDbContext();
+				TillerSelectedSpreadsheetEntity? current = await context.Set<TillerSelectedSpreadsheetEntity>().SingleOrDefaultAsync(cancellationToken);
+				if (current is null)
+				{
+					context.Set<TillerSelectedSpreadsheetEntity>().Add(new TillerSelectedSpreadsheetEntity
+					{ Id = Guid.NewGuid(), SpreadsheetId = spreadsheetId, UpdatedAt = DateTimeOffset.UtcNow });
+					await context.SaveChangesAsync(cancellationToken);
+				}
+				else if (!string.Equals(current.SpreadsheetId, spreadsheetId, StringComparison.Ordinal))
+					throw new InvalidOperationException("Spreadsheet selection changed during import.");
+			}
+			return result;
+		}
+		finally { SyncGate.Release(); }
+	}
+
 	public async Task<TillerSyncStatus> GetSyncStatusAsync(CancellationToken cancellationToken)
 	{
 		string? spreadsheetId = await selectionService.GetSelectedSpreadsheetIdAsync(cancellationToken);
@@ -90,7 +127,8 @@ public class TillerSyncService(
 		string spreadsheetId,
 		TillerSyncEventType eventType,
 		DateOnly? fromDate,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<TillerTransactionRow>? executorRows = null)
 	{
 		int inserted = 0, updated = 0, reconciled = 0, duplicates = 0, invalid = 0, pages = 0;
 		int offset = 0;
@@ -104,10 +142,13 @@ public class TillerSyncService(
 		{
 			while (true)
 			{
-				TillerTransactionPage page = await tillerApiClient.QueryTransactionsAsync(
-					spreadsheetId,
-					new TillerTransactionQuery(fromDate, null, null, "date", "asc", pageSize, offset),
-					cancellationToken);
+				TillerTransactionPage page = executorRows is null
+					? await tillerApiClient.QueryTransactionsAsync(
+						spreadsheetId,
+						new TillerTransactionQuery(fromDate, null, null, "date", "asc", pageSize, offset),
+						cancellationToken)
+					: new TillerTransactionPage(executorRows.Skip(offset).Take(pageSize).ToList(),
+						offset + pageSize < executorRows.Count, executorRows.Count);
 				pages++;
 
 				// Pagination consistency guards (verified provider contract):
