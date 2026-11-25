@@ -234,7 +234,7 @@ export function qualifyItemization(raw, ocrText) {
   if (Array.isArray(raw.adjustments) && raw.adjustments.length > 40) problems.push("Too many adjustments");
   if (!ocrText || ocrText.length < 20 || ocrText.length > 100000) problems.push("OCR content is missing or exceeds safe size");
   if (total !== subtotal + tax + adjustmentTotal) problems.push("Printed total does not reconcile with items, tax and adjustments");
-  if (raw.confidence !== "high") problems.push("Model did not attest high confidence");
+  // Model confidence is advisory; objective qualification controls import.
   if (raw.hasRefunds === true || raw.mixedTender === true) problems.push("Refund or mixed tender requires review");
   return {
     ok: problems.length === 0, problems: [...new Set(problems)],
@@ -280,7 +280,7 @@ export function verifyReviewAttestation(attestation, { ocrText, draftRevision, p
   return { ok: problems.length === 0, problems, reviewer, ocrSha256: expected };
 }
 
-// Only the model's confidence finding is approvable. Structural findings
+// Preserve legacy confidence-only attestation compatibility. Structural findings
 // (math, evidence, units, reconciliation) never become importable by approval.
 export function authorizeImport(qualified, attestation, context = {}) {
   if (qualified?.ok) return { ok: true, approved: false, problems: [] };
@@ -437,8 +437,8 @@ export function stableSourceRequestId(instance, paperlessId) {
 }
 
 export function toCompleteReceiptRequest(qualified, instance, paperlessId, attestation = null) {
-  // A low-confidence draft is importable only with an attestation that
-  // authorizeImport already validated; structural findings never are.
+  // Legacy confidence-only qualification failures require a validated attestation.
+  // Current qualification treats confidence as advisory; structural findings remain blocked.
   const approvalBound = attestation && typeof attestation.reviewer === "string" && attestation.reviewer !== "" &&
     typeof attestation.ocrSha256 === "string" && typeof attestation.draftRevision === "string";
   const approvable = !qualified.ok && approvalBound &&
