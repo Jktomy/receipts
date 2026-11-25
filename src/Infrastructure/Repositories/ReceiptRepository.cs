@@ -294,6 +294,20 @@ public class ReceiptRepository(IDbContextFactory<ApplicationDbContext> contextFa
 			existingEntity.TaxAmount = entity.TaxAmount;
 			existingEntity.TaxAmountCurrency = entity.TaxAmountCurrency;
 			existingEntity.TaxUnknown = entity.TaxUnknown;
+			// Provenance bind-once: a receipt gains its Paperless source link at most
+			// once, through an explicit correction carrying the document id. A different
+			// id is rejected; the same id is an idempotent no-op. Ordinary edits carry
+			// a null link and leave the stored one untouched.
+			if (entity.SourcePaperlessDocumentId is long incomingLink)
+			{
+				if (existingEntity.SourcePaperlessDocumentId is long storedLink && storedLink != incomingLink)
+				{
+					throw new ProvenanceAssertionException(Domain.Core.Receipt.SourcePaperlessDocumentIdRebindRejected);
+				}
+
+				existingEntity.SourcePaperlessDocumentId = incomingLink;
+			}
+
 			if (string.Equals(entity.SourceKind, "paperless-verified", StringComparison.Ordinal)
 				&& existingEntity.SourcePaperlessDocumentId is null)
 			{

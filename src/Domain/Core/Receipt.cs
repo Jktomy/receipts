@@ -25,6 +25,8 @@ public class Receipt
 
 	public const string PaperlessVerifiedRequiresDocumentId = "paperless-verified requires the linked Paperless document ID.";
 
+	public const string SourcePaperlessDocumentIdRebindRejected = "Paperless source link is already set and cannot be changed.";
+
 	public Receipt(Guid id, string location, DateOnly date, Money taxAmount, string? sourceKind = null, bool taxUnknown = false)
 	{
 		if (string.IsNullOrWhiteSpace(location))

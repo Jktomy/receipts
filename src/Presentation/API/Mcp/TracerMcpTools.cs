@@ -138,14 +138,26 @@ public sealed class TracerMcpTools(
 	}
 
 	[McpServerTool(Name = "receipts_correct", Title = "Correct receipt")]
-	[Description("Correct location and/or tax on a receipt. Only supplied fields change; provenance and items are preserved.")]
+	[Description("Correct location, tax and/or provenance on a receipt. Only supplied fields change; items are preserved.")]
 	public async Task<bool> ReceiptsCorrectAsync(
 		[Description("Receipt id.")] Guid id,
 		[Description("Corrected store/location, or null to keep.")] string? location = null,
 		[Description("Corrected tax amount, or null to keep.")] decimal? taxAmount = null,
 		[Description("Corrected tax-unknown flag, or null to keep.")] bool? taxUnknown = null,
+		[Description("Provenance kind (photo-observed, user-reported, paperless-verified), or null to keep. paperless-verified requires sourcePaperlessDocumentId.")] string? sourceKind = null,
+		[Description("Paperless-ngx document id this receipt was imported from, or null to keep. Binds once; a different id is rejected.")] long? sourcePaperlessDocumentId = null,
 		CancellationToken cancellationToken = default)
 	{
+		if (sourceKind is not null && !Receipt.AdmittedSourceKinds.Contains(sourceKind))
+		{
+			throw new ArgumentException(Receipt.SourceKindNotAdmitted, nameof(sourceKind));
+		}
+
+		if (sourcePaperlessDocumentId is not null && (sourcePaperlessDocumentId <= 0 || sourcePaperlessDocumentId > 2147483647))
+		{
+			throw new ArgumentException(Receipt.SourcePaperlessDocumentIdOutOfRange, nameof(sourcePaperlessDocumentId));
+		}
+
 		Receipt? current = await mediator.Send(new GetReceiptByIdQuery(id), cancellationToken);
 		if (current is null)
 		{
@@ -157,8 +169,13 @@ public sealed class TracerMcpTools(
 			location ?? current.Location,
 			current.Date,
 			taxAmount.HasValue ? new Money(taxAmount.Value) : current.TaxAmount,
-			sourceKind: current.SourceKind,
-			taxUnknown: taxUnknown ?? current.TaxUnknown);
+			sourceKind: sourceKind ?? current.SourceKind,
+			taxUnknown: taxUnknown ?? current.TaxUnknown)
+		{
+			PaidFromEnvelopeId = current.PaidFromEnvelopeId,
+			OccasionId = current.OccasionId,
+			SourcePaperlessDocumentId = sourcePaperlessDocumentId ?? current.SourcePaperlessDocumentId
+		};
 		return await mediator.Send(new UpdateReceiptCommand([updated]), cancellationToken);
 	}
 
