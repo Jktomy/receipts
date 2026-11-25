@@ -126,7 +126,8 @@ export type TillerMatchDecision =
   | "manual"
   | "ambiguous"
   | "taken"
-  | "none";
+  | "none"
+  | "possibletip";
 
 export interface TillerMatchCandidate {
   receiptId: string;
@@ -139,6 +140,7 @@ export interface TillerMatchSuggestion {
   receiptId: string | null;
   confidence: string | null;
   candidates: TillerMatchCandidate[];
+  suggestedTip?: number | null;
 }
 
 export interface TillerLinkHistoryEntry {

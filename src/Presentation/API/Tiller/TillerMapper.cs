@@ -44,7 +44,8 @@ public class TillerMapper
 		source.Decision.ToString().ToLowerInvariant(),
 		source.ReceiptId,
 		source.Confidence,
-		source.Candidates.Select(c => new TillerMatchCandidateDto(c.ReceiptId, c.ProviderTransactionId, c.DateWithinDays)).ToList());
+		source.Candidates.Select(c => new TillerMatchCandidateDto(c.ReceiptId, c.ProviderTransactionId, c.DateWithinDays)).ToList(),
+		source.SuggestedTip);
 
 	public TillerLinkHistoryListDto ToHistoryListDto(IReadOnlyList<TillerLinkHistoryEntry> source) => new(
 		source.Select(h => new TillerLinkHistoryDto(h.Action, h.ReceiptId, h.Reviewer, h.At)).ToList());

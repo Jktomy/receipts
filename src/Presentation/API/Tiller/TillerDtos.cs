@@ -73,7 +73,8 @@ public sealed record TillerMatchSuggestionDto(
 	string Decision,
 	Guid? ReceiptId,
 	string? Confidence,
-	IReadOnlyList<TillerMatchCandidateDto> Candidates);
+	IReadOnlyList<TillerMatchCandidateDto> Candidates,
+	decimal? SuggestedTip = null);
 
 public sealed record TillerLinkHistoryDto(
 	string Action,
