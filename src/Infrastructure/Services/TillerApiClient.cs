@@ -48,18 +48,19 @@ public class TillerApiClient(
 	private string? BaseUrl => configuration[Tiller.TillerConfigurationKeys.BaseUrl];
 	private string? AccountId => configuration[Tiller.TillerConfigurationKeys.AccountId];
 	private string? TokenFile => configuration["TILLER_TOKEN_FILE"];
+	private string? OAuthFile => configuration["TILLER_OAUTH_FILE"];
 
 	public bool IsConfigured =>
 		!string.IsNullOrWhiteSpace(BaseUrl)
 		&& !string.IsNullOrWhiteSpace(AccountId)
-		&& !string.IsNullOrWhiteSpace(TokenFile);
+		&& (!string.IsNullOrWhiteSpace(OAuthFile) || !string.IsNullOrWhiteSpace(TokenFile));
 
 	private void RequireConfigured()
 	{
 		if (!IsConfigured)
 		{
 			throw new InvalidOperationException(
-				"Tiller read interface is not configured (TILLER_BASE_URL / TILLER_ACCOUNT_ID / TILLER_TOKEN_FILE). No request was sent.");
+				"Tiller read interface is not configured (TILLER_BASE_URL / TILLER_ACCOUNT_ID / TILLER_OAUTH_FILE or TILLER_TOKEN_FILE). No request was sent.");
 		}
 	}
 
@@ -367,18 +368,17 @@ public class TillerApiClient(
 
 		// Strict order: destination validated (https) before the credential
 		// handle is even read; the bearer is never attached to a rejected route.
-		Uri _ = McpUri;
-		string bearer = LoadBearerToken();
+		Uri destination = McpUri;
+		string bearer = !string.IsNullOrWhiteSpace(OAuthFile)
+			? await TillerOAuthTokenStore.GetBearerAsync(destination, OAuthFile, cancellationToken)
+			: LoadBearerToken();
 		await EnsureMcpSessionAsync(bearer, cancellationToken);
 
 		logger.LogDebug("Tiller read {Path}", path);
 		JsonElement root = await SendToolsCallAsync(path, input, bearer, hadSession: _sessionId is not null, cancellationToken);
-		if (root.TryGetProperty("error", out JsonElement rpcError))
+		if (root.TryGetProperty("error", out _))
 		{
-			string message = rpcError.TryGetProperty("message", out JsonElement rpcMessage)
-				? rpcMessage.GetString() ?? "unknown RPC error"
-				: "unknown RPC error";
-			throw new InvalidOperationException($"Tiller MCP call {path} failed: {message}. No result was accepted.");
+			throw new InvalidOperationException($"Tiller MCP call {path} returned an RPC error. No result was accepted.");
 		}
 
 		if (!root.TryGetProperty("result", out JsonElement result))
