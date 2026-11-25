@@ -1,10 +1,4 @@
-// W25 release gate — native Cadmus admission (synthetic fixtures only).
-// First extraction under the destination tag requires NATIVE tag-history
-// evidence: a 21-add at/after the current-version floor (file version +
-// document modified) by an authorized actor with no later removal (see
-// evaluateReleaseBinding). No caller-supplied observation is accepted
-// (rejected at the webhook); tag presence alone never authorizes.
-// No live Paperless/model/destination touches.
+// Authenticated destination-tag handoff; synthetic fixtures, no real source writes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -197,11 +191,12 @@ test("missing destination tag id fails fast at startup (no silent misconfigurati
   );
 });
 
-test("destination tag without authorized history add is held pre-model", async () => {
-  const h = harness({ tags: [TRACER], auth: [2] });
+test("destination tag works without owner-only audit history", async () => {
+  const h = harness({ tags: [TRACER], auth: [] });
   const { state } = await drive(h);
-  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.equal(h.stats().modelCalls, 0);
+  assert.equal(state.status, "READY_FOR_REVIEW");
+  assert.equal(h.stats().historyCalls, 0);
+  assert.equal(h.stats().modelCalls, 1);
   assert.equal(h.stats().destCalls, 0);
 });
 
@@ -214,20 +209,18 @@ test("destination drafts WITHOUT stale release tag: zero model and zero destinat
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("stale ID21 add alone never authorizes extraction", async () => {
-  const h = harness({ tags: [TRACER, RETAGGED], auth: [2] });
-  h.setLive([TRACER, RETAGGED], undefined, { history: [tagAdd21(ADD_AUTH)] });
+test("Receipt and legacy tags alone never authorize extraction", async () => {
+  const h = harness({ tags: [26, RETAGGED] });
   const { state } = await drive(h);
-  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(state.status, "REVIEW_REQUIRED");
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("Reviewed16/ShadowProcessed22 are not release authority: destination history still required", async () => {
-  const h = harness({ tags: [TRACER, REVIEWED, SHADOW_PROCESSED], auth: [2] });
-  h.setLive([TRACER, REVIEWED, SHADOW_PROCESSED]);
+test("Reviewed and Shadow Processed do not substitute for Tracer", async () => {
+  const h = harness({ tags: [REVIEWED, SHADOW_PROCESSED] });
   const { state } = await drive(h);
-  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(state.status, "REVIEW_REQUIRED");
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
@@ -238,18 +231,17 @@ test("native authorized destination-add at/after the version floor drafts (posit
   const { state } = await drive(h);
   assert.equal(state.status, "READY_FOR_REVIEW");
   assert.ok(state.draft);
-  assert.equal(state.releaseBinding?.qualifyingAdds, 1);
+  assert.equal(state.releaseBinding?.method, "authenticated-destination-tag");
   assert.equal(h.stats().modelCalls, 1);
   assert.equal(h.stats().destCalls, 0);
   assert.equal(h.stats().paperlessPosts, 0);
-  assert.ok(h.stats().historyCalls >= 1, "native history must be consulted");
+  assert.equal(h.stats().historyCalls, 0, "no owner-only native audit history needed");
 });
 
-test("forged callback tags are ignored: server re-fetch governs, zero model calls", async () => {
-  const h = harness({ tags: [TRACER], auth: [2] });
-  h.setLive([TRACER], undefined, { history: [tagAdd21(ADD_AUTH)] });
+test("forged callback tags are ignored: native source must carry Tracer", async () => {
+  const h = harness({ tags: [26] });
   const { state } = await drive(h, 9501, { sourceId: 9501, tags: [TRACER, RETAGGED] });
-  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(state.status, "REVIEW_REQUIRED");
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
@@ -458,127 +450,44 @@ test("RELEASE_STALE auto-resolves when the source reverts to the released revisi
   assert.equal(h.stats().modelCalls, 1);
 });
 
-test("human correction adopts the current source, but import needs native re-release", async () => {
-  const h = harness({ auth: [2] });
-  h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
+test("changed source requires manual correction, current tag and exact new revision", async () => {
+  const h = harness({ tags: [TRACER] });
   const { bridge, state, call, settle, close } = await live(h);
   try {
     const s1 = await settle();
-    assert.equal(s1.status, "READY_FOR_REVIEW");
-    const rev1 = s1.draftRevision;
-    h.setLive([TRACER, RETAGGED], ocrThankYou, { versions: VBver, modified: VB });
+    h.setLive([TRACER], ocrThankYou, { versions: VBver, modified: VB });
     const s2 = await settle();
     assert.equal(s2.status, "RELEASE_STALE_REVIEW");
-    // Operator reviewed the current source natively and saves a correction:
-    // the save adopts the current revision as the reviewed baseline.
-    const put = await call("PUT", "/drafts/9501", { ...good, merchant: "SYNTH MART Plus", expectedRevision: rev1 }, "op");
+    assert.equal((await bridge.importReviewed(9501, s1.draftRevision)).status, 409);
+    assert.equal(h.stats().destCalls, 0);
+    const put = await call("PUT", "/drafts/9501", { ...good, expectedRevision: s1.draftRevision }, "op");
     assert.equal(put.status, 200);
     const saved = state(9501);
-    assert.equal(saved.status, "READY_FOR_REVIEW");
-    assert.equal(saved.reviewerEdited, true);
-    const v2hash = createHash("sha256").update(ocrThankYou, "utf8").digest("hex");
-    assert.equal(saved.contentHash, v2hash);
-    // The human baseline alone is not a native release: import still denies.
-    const denied = await bridge.importReviewed(9501, saved.draftRevision);
-    assert.equal(denied.status, 409);
-    assert.match(denied.result.error, /Current-version release unproven/);
+    h.setLive([]);
+    assert.equal((await bridge.importReviewed(9501, saved.draftRevision)).status, 409);
     assert.equal(h.stats().destCalls, 0);
-    assert.equal(state(9501).status, "READY_FOR_REVIEW");
-    // Native re-release (fresh authorized add after the current version),
-    // then the same approved import succeeds with one destination write.
-    h.setLive([TRACER, RETAGGED], ocrThankYou, { history: [tagAdd(ADD_AUTH), tagAdd(T3)], versions: VBver, modified: VB });
-    const imp = await bridge.importReviewed(9501, saved.draftRevision);
-    assert.equal(imp.status, 200);
-    assert.equal(h.stats().destCalls, 1);
-  } finally {
-    close();
+  } finally { close(); }
+});
+
+test("Hold and Clone deny even with authenticated Tracer release", async () => {
+  for (const blocked of [28, 29]) {
+    const h = harness({ tags: [TRACER, blocked] });
+    const { state } = await drive(h);
+    assert.equal(state.status, "REVIEW_REQUIRED");
+    assert.equal(h.stats().modelCalls, 0);
+    assert.equal(h.stats().destCalls, 0);
   }
 });
 
-test("stale first intake with retained 21 is held pre-model (W27 boundary)", async () => {
-  // Release story covered A, live source is B, 21 retained, no prior draft.
-  // Native tag state cannot distinguish this from a fresh authorization —
-  // and native history here carries no authorizing add for B.
-  const h = harness({ auth: [2] });
-  h.setLive([TRACER, RETAGGED], ocrBAG, { versions: VBver, modified: VB });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-firststale-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
+test("file revision change with identical OCR blocks reviewed import", async () => {
+  const h = harness({ tags: [TRACER] });
+  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir: mkdtempSync(join(tmpdir(), "tag-file-change-")) });
   await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /Current-version release unproven/);
-  assert.equal(s.draft, undefined);
-  assert.equal(h.stats().modelCalls, 0);
+  const ready = bridge.state(9501);
+  assert.equal(ready.status, "READY_FOR_REVIEW");
+  h.setLive([TRACER], ocr, { versions: VBver, modified: VB });
+  assert.equal((await bridge.importReviewed(9501, ready.draftRevision)).status, 409);
   assert.equal(h.stats().destCalls, 0);
-});
-
-test("revocation on a later history page denies (pages must be exhausted)", async () => {
-  // Envelopes are never partially consumed: a declared page set is ambiguous
-  // evidence (a revocation may hide on an unfetched page), so the wrapper
-  // itself is denied without following further pages.
-  const h = harness({ auth: [2], historyPages: { count: 2, pages: [[tagAdd(ADD_AUTH)], [{ action: "update", tagsOp: "remove", tagsObjects: [21], ts: T3, actorId: 2 }]] } });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-page2rev-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
-  await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /wrapper|partial|ambiguous/i);
-  assert.equal(h.stats().modelCalls, 0);
-  assert.equal(h.stats().historyCalls, 1);
-});
-
-test("incomplete history page set denies (count exceeds collected entries)", async () => {
-  const h = harness({ auth: [2], historyPages: { count: 5, pages: [[tagAdd(ADD_AUTH)]] } });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-pagecount-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
-  await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /wrapper|partial|ambiguous|incomplete|unavailable/i);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("fully-fetchable envelope is still denied (no partial-wrapper admission)", async () => {
-  // Even a self-consistent envelope (count matches, no next page) is an
-  // ambiguous wrapper: the installed endpoint returns complete bare arrays,
-  // so any envelope shape fails closed rather than being trusted piecemeal.
-  const h = harness({ auth: [2], historyPages: { count: 1, pages: [[tagAdd(ADD_AUTH)]] } });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-envok-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
-  await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /wrapper|partial|ambiguous/i);
-  assert.equal(h.stats().modelCalls, 0);
-  assert.equal(h.stats().historyCalls, 1);
-});
-
-test("oversized history denies before model (bounded evidence)", async () => {
-  const h = harness({ auth: [2] });
-  const big = Array.from({ length: 5001 }, () => ({ action: "update", changes: { title: "x" }, ts: ADD_AUTH, actorId: 1 }));
-  big[0] = tagAdd(ADD_AUTH);
-  h.setLive([TRACER, RETAGGED], undefined, { history: big });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-big-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
-  await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /safe bounds/i);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("R20 HOLD posture: empty authorized set denies everything", async () => {
-  // Production posture: full native evidence for the current version exists,
-  // but no separately authorized releasers are configured. Deny-all.
-  const h = harness();
-  h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
-  const dataDir = mkdtempSync(join(tmpdir(), "w25-hold-"));
-  const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
-  await bridge.processDocument(9501);
-  const s = bridge.state(9501);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.match(s.reason ?? "", /no authorized releasers/);
-  assert.equal(h.stats().modelCalls, 0);
 });
 
 test("release observation must survive mid-wait source changes (proven revision binds)", async () => {
