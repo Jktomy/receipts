@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Application.Interfaces.Services;
 using Application.Models.Tiller;
 using Infrastructure.Entities.Core;
@@ -10,9 +8,8 @@ namespace Infrastructure.Services;
 
 // Native Tiller sync engine (port of the verified W32 prototype behavior
 // into the application layers). Reads ONLY through the allowlisted client.
-// Crash-safe: the checkpoint is saved after every page, so an interrupted
-// run resumes instead of restarting, and remembered IDs make redelivery
-// converge instead of duplicating.
+// Full reconciliation replays history; source IDs make repeated reads converge.
+// Never infer that two different source transactions are one purchase.
 public class TillerSyncService(
 	IDbContextFactory<ApplicationDbContext> contextFactory,
 	ITillerApiClient tillerApiClient,
@@ -20,22 +17,84 @@ public class TillerSyncService(
 	TillerClientOptions? options = null) : ITillerSyncService
 {
 	private readonly TillerClientOptions _options = options ?? new TillerClientOptions();
+	private static readonly SemaphoreSlim SyncGate = new(1, 1);
 
 	public async Task<TillerSyncResult> SyncFullAsync(CancellationToken cancellationToken)
 	{
-		string spreadsheetId = await RequireSpreadsheetAsync(cancellationToken);
-		TillerCheckpointEntity? checkpoint = await LoadCheckpointAsync(spreadsheetId, cancellationToken);
-		DateOnly? fromDate = checkpoint is not null && !checkpoint.Completed
-			? checkpoint.SyncedThroughDate
-			: null;
-		return await RunAsync(spreadsheetId, TillerSyncEventType.Full, fromDate, cancellationToken);
+		await SyncGate.WaitAsync(cancellationToken);
+		try
+		{
+			string spreadsheetId = await RequireSpreadsheetAsync(cancellationToken);
+			return await RunAsync(spreadsheetId, TillerSyncEventType.Full, null, cancellationToken);
+		}
+		finally
+		{
+			SyncGate.Release();
+		}
 	}
 
 	public async Task<TillerSyncResult> SyncIncrementalAsync(CancellationToken cancellationToken)
 	{
-		string spreadsheetId = await RequireSpreadsheetAsync(cancellationToken);
-		TillerCheckpointEntity? checkpoint = await LoadCheckpointAsync(spreadsheetId, cancellationToken);
-		return await RunAsync(spreadsheetId, TillerSyncEventType.Incremental, checkpoint?.SyncedThroughDate, cancellationToken);
+		await SyncGate.WaitAsync(cancellationToken);
+		try
+		{
+			string spreadsheetId = await RequireSpreadsheetAsync(cancellationToken);
+			TillerCheckpointEntity? checkpoint = await LoadCheckpointAsync(spreadsheetId, cancellationToken);
+			return await RunAsync(spreadsheetId, TillerSyncEventType.Incremental,
+				checkpoint?.Completed == true ? checkpoint.SyncedThroughDate : null, cancellationToken);
+		}
+		finally
+		{
+			SyncGate.Release();
+		}
+	}
+
+	// Executor owns the renewable Tiller connection. Accept a full, validated
+	// snapshot from the authorized local caller, using the same identity guards.
+	public async Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total,
+		IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken)
+	{
+		if (total < 0 || total != rows.Count || rows.Count > 50000 || rows.Any(r => r is null
+			|| string.IsNullOrWhiteSpace(r.TransactionId) || IsPlaceholderId(r.TransactionId)
+			|| r.Date == default || r.Description is null || r.Account is null || r.Institution is null
+			|| string.IsNullOrWhiteSpace(r.Status)))
+		{
+			throw new InvalidOperationException("Incomplete or invalid Executor snapshot; no import accepted.");
+		}
+		if (rows.Select(r => r.TransactionId).Distinct(StringComparer.Ordinal).Count() != total)
+		{
+			throw new InvalidOperationException("Repeated source transaction ID; no import accepted.");
+		}
+		await SyncGate.WaitAsync(cancellationToken);
+		try
+		{
+			string? selected = await selectionService.GetSelectedSpreadsheetIdAsync(cancellationToken);
+			if (selected is not null && !string.Equals(selected, spreadsheetId, StringComparison.Ordinal))
+			{
+				throw new InvalidOperationException("Executor snapshot differs from selected spreadsheet.");
+			}
+			TillerSyncResult result = await RunAsync(spreadsheetId, TillerSyncEventType.Full, null, cancellationToken, rows);
+			if (selected is null)
+			{
+				await using ApplicationDbContext context = contextFactory.CreateDbContext();
+				TillerSelectedSpreadsheetEntity? current = await context.Set<TillerSelectedSpreadsheetEntity>().SingleOrDefaultAsync(cancellationToken);
+				if (current is null)
+				{
+					context.Set<TillerSelectedSpreadsheetEntity>().Add(new TillerSelectedSpreadsheetEntity
+					{ Id = Guid.NewGuid(), SpreadsheetId = spreadsheetId, UpdatedAt = DateTimeOffset.UtcNow });
+					await context.SaveChangesAsync(cancellationToken);
+				}
+				else if (!string.Equals(current.SpreadsheetId, spreadsheetId, StringComparison.Ordinal))
+				{
+					throw new InvalidOperationException("Spreadsheet selection changed during import.");
+				}
+			}
+			return result;
+		}
+		finally
+		{
+			SyncGate.Release();
+		}
 	}
 
 	public async Task<TillerSyncStatus> GetSyncStatusAsync(CancellationToken cancellationToken)
@@ -79,7 +138,8 @@ public class TillerSyncService(
 		string spreadsheetId,
 		TillerSyncEventType eventType,
 		DateOnly? fromDate,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<TillerTransactionRow>? executorRows = null)
 	{
 		int inserted = 0, updated = 0, reconciled = 0, duplicates = 0, invalid = 0, pages = 0;
 		int offset = 0;
@@ -87,15 +147,19 @@ public class TillerSyncService(
 		int pageSize = Math.Clamp(_options.DefaultPageSize, 1, _options.MaxPageSize);
 		int? expectedTotal = null;
 		HashSet<string> seenPageFingerprints = new(StringComparer.Ordinal);
+		Dictionary<string, TillerTransactionRow> sourceRows = new(StringComparer.Ordinal);
 
 		try
 		{
 			while (true)
 			{
-				TillerTransactionPage page = await tillerApiClient.QueryTransactionsAsync(
-					spreadsheetId,
-					new TillerTransactionQuery(fromDate, null, null, "date", "asc", pageSize, offset),
-					cancellationToken);
+				TillerTransactionPage page = executorRows is null
+					? await tillerApiClient.QueryTransactionsAsync(
+						spreadsheetId,
+						new TillerTransactionQuery(fromDate, null, null, "date", "asc", pageSize, offset),
+						cancellationToken)
+					: new TillerTransactionPage(executorRows.Skip(offset).Take(pageSize).ToList(),
+						offset + pageSize < executorRows.Count, executorRows.Count);
 				pages++;
 
 				// Pagination consistency guards (verified provider contract):
@@ -147,13 +211,15 @@ public class TillerSyncService(
 
 				foreach (TillerTransactionRow row in page.Rows)
 				{
-					switch (await UpsertAsync(spreadsheetId, row, cancellationToken))
+					if (string.IsNullOrWhiteSpace(row.TransactionId) || IsPlaceholderId(row.TransactionId))
 					{
-						case UpsertOutcome.Inserted: inserted++; break;
-						case UpsertOutcome.Updated: updated++; break;
-						case UpsertOutcome.Reconciled: reconciled++; break;
-						case UpsertOutcome.Duplicate: duplicates++; break;
-						case UpsertOutcome.Invalid: invalid++; break;
+						invalid++;
+						continue;
+					}
+
+					if (!sourceRows.TryAdd(row.TransactionId, row))
+					{
+						throw new InvalidOperationException("Tiller repeated a transaction ID within one scan; refusing ambiguous source data.");
 					}
 
 					if (maxDate is null || row.Date > maxDate)
@@ -161,8 +227,6 @@ public class TillerSyncService(
 						maxDate = row.Date;
 					}
 				}
-
-				await SaveCheckpointAsync(spreadsheetId, maxDate, completed: !page.Truncated, cancellationToken);
 
 				if (!page.Truncated)
 				{
@@ -175,6 +239,37 @@ public class TillerSyncService(
 					break;
 				}
 			}
+			// A complete source scan can prove absence, but not the reason for it.
+			// Hold rather than deleting a transaction or silently retaining it as current.
+			if (fromDate is null)
+			{
+				await using ApplicationDbContext context = contextFactory.CreateDbContext();
+				List<string> cachedIds = await context.Set<TillerTransactionEntity>()
+					.Where(e => e.SpreadsheetId == spreadsheetId && e.SupersededBy == null)
+					.Select(e => e.ProviderTransactionId).ToListAsync(cancellationToken);
+				int absent = cachedIds.Count(id => !sourceRows.ContainsKey(id));
+				if (absent > 0)
+				{
+					throw new InvalidOperationException($"Tiller full scan omitted {absent} cached transaction IDs; source changes require review before accepting a new snapshot.");
+				}
+			}
+
+			// Only accept rows after the complete paginated read passes its guards.
+			// No inferred merging or destructive handling of missing source IDs.
+			await SaveCheckpointAsync(spreadsheetId, maxDate, completed: false, cancellationToken);
+			foreach (TillerTransactionRow row in sourceRows.Values)
+			{
+				switch (await UpsertAsync(spreadsheetId, row, cancellationToken))
+				{
+					case UpsertOutcome.Inserted: inserted++; break;
+					case UpsertOutcome.Updated: updated++; break;
+					case UpsertOutcome.Reconciled: reconciled++; break;
+					case UpsertOutcome.Duplicate: duplicates++; break;
+					case UpsertOutcome.Invalid: invalid++; break;
+				}
+			}
+
+			await SaveCheckpointAsync(spreadsheetId, maxDate, completed: true, cancellationToken);
 		}
 		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
@@ -200,7 +295,7 @@ public class TillerSyncService(
 		TillerTransactionRow row,
 		CancellationToken cancellationToken)
 	{
-		if (IsPlaceholderId(row.TransactionId))
+		if (string.IsNullOrWhiteSpace(row.TransactionId) || IsPlaceholderId(row.TransactionId))
 		{
 			// Rows without a real Transaction ID can never join safely; the
 			// sheet can re-issue them under a real ID later and they would
@@ -217,6 +312,11 @@ public class TillerSyncService(
 
 		if (existing is not null)
 		{
+			if (existing.SupersededBy is not null)
+			{
+				throw new InvalidOperationException("Legacy Tiller transaction merge requires reconciliation before sync.");
+			}
+
 			if (FactsEqual(existing, row))
 			{
 				return UpsertOutcome.Unchanged;
@@ -229,65 +329,18 @@ public class TillerSyncService(
 			return UpsertOutcome.Updated;
 		}
 
+		// A known ID without its own record indicates legacy aliasing or an
+		// inconsistent cache. Do not silently suppress it or move receipt links.
 		bool known = await context.Set<TillerKnownIdEntity>()
-			.AnyAsync(
-				e => e.SpreadsheetId == spreadsheetId && e.ProviderTransactionId == row.TransactionId,
+			.AnyAsync(e => e.SpreadsheetId == spreadsheetId && e.ProviderTransactionId == row.TransactionId,
 				cancellationToken);
 		if (known)
 		{
-			return UpsertOutcome.Duplicate;
+			throw new InvalidOperationException("Legacy Tiller transaction identity requires reconciliation before sync.");
 		}
 
-		if (string.Equals(row.Status, "posted", StringComparison.OrdinalIgnoreCase))
-		{
-			TillerTransactionEntity? pending = await FindPendingCounterpartAsync(context, spreadsheetId, row, cancellationToken);
-			if (pending is not null)
-			{
-				pending.SupersededBy = row.TransactionId;
-				pending.UpdatedAt = DateTimeOffset.UtcNow;
-
-				// Links and human overlays carry to the posted canonical record.
-				List<TillerReceiptLinkEntity> links = await context.Set<TillerReceiptLinkEntity>()
-					.Where(l => l.ProviderTransactionId == pending.ProviderTransactionId && l.SupersededAt == null)
-					.ToListAsync(cancellationToken);
-				foreach (TillerReceiptLinkEntity link in links)
-				{
-					link.ProviderTransactionId = row.TransactionId;
-				}
-
-				context.Set<TillerTransactionEntity>().Add(Canonical(spreadsheetId, row));
-				context.Set<TillerKnownIdEntity>().Add(new TillerKnownIdEntity
-				{
-					Id = Guid.NewGuid(),
-					ProviderTransactionId = row.TransactionId,
-					SpreadsheetId = spreadsheetId,
-					CanonicalProviderTransactionId = row.TransactionId,
-					SeenAt = DateTimeOffset.UtcNow,
-				});
-				await context.SaveChangesAsync(cancellationToken);
-				return UpsertOutcome.Reconciled;
-			}
-		}
-
-		string fingerprint = Fingerprint(row);
-		TillerTransactionEntity? canonical = await context.Set<TillerTransactionEntity>()
-			.Where(e => e.SpreadsheetId == spreadsheetId && e.SupersededBy == null)
-			.AsNoTracking()
-			.ToListAsync(cancellationToken)
-			.ContinueWith(t => t.Result.FirstOrDefault(e => Fingerprint(e) == fingerprint), cancellationToken);
-
-		if (canonical is not null)
-		{
-			context.Set<TillerKnownIdEntity>().Add(new TillerKnownIdEntity
-			{
-				ProviderTransactionId = row.TransactionId,
-				SpreadsheetId = spreadsheetId,
-				CanonicalProviderTransactionId = canonical.ProviderTransactionId,
-				SeenAt = DateTimeOffset.UtcNow,
-			});
-			await context.SaveChangesAsync(cancellationToken);
-			return UpsertOutcome.Duplicate;
-		}
+		// Every new stable source ID receives its own record, regardless of
+		// matching merchant, date, amount, category or pending status.
 
 		context.Set<TillerTransactionEntity>().Add(Canonical(spreadsheetId, row));
 		context.Set<TillerKnownIdEntity>().Add(new TillerKnownIdEntity
@@ -336,62 +389,6 @@ public class TillerSyncService(
 		&& string.Equals(entity.Institution, row.Institution, StringComparison.Ordinal)
 		&& string.Equals(entity.Status, row.Status, StringComparison.Ordinal)
 		&& string.Equals(entity.SplitGroupId, row.SplitGroupId, StringComparison.Ordinal);
-
-	private static async Task<TillerTransactionEntity?> FindPendingCounterpartAsync(
-		ApplicationDbContext context,
-		string spreadsheetId,
-		TillerTransactionRow posted,
-		CancellationToken cancellationToken)
-	{
-		List<TillerTransactionEntity> candidates = await context.Set<TillerTransactionEntity>()
-			.Where(e => e.SpreadsheetId == spreadsheetId
-				&& e.SupersededBy == null
-				&& e.Status == "pending"
-				&& e.Account == posted.Account
-				&& e.Amount == posted.Amount)
-			.ToListAsync(cancellationToken);
-
-		return candidates.FirstOrDefault(e =>
-			Math.Abs(e.Date.DayNumber - posted.Date.DayNumber) <= 1
-			&& string.Equals(Normalize(e.Description), Normalize(posted.Description), StringComparison.Ordinal));
-	}
-
-	private static string Normalize(string? value)
-	{
-		if (string.IsNullOrEmpty(value))
-		{
-			return string.Empty;
-		}
-
-		StringBuilder builder = new(value.Length);
-		foreach (char c in value.ToLowerInvariant())
-		{
-			if (char.IsLetterOrDigit(c))
-			{
-				builder.Append(c);
-			}
-		}
-
-		return builder.ToString();
-	}
-
-	private static string Fingerprint(TillerTransactionRow row) =>
-		Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(
-			"\0",
-			row.Account,
-			row.Date.ToString("yyyy-MM-dd"),
-			Normalize(row.Description),
-			row.Amount.ToString("0.00"),
-			row.Category ?? string.Empty))));
-
-	private static string Fingerprint(TillerTransactionEntity entity) =>
-		Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(
-			"\0",
-			entity.Account,
-			entity.Date.ToString("yyyy-MM-dd"),
-			Normalize(entity.Description),
-			entity.Amount.ToString("0.00"),
-			entity.Category ?? string.Empty))));
 
 	private async Task<TillerCheckpointEntity?> LoadCheckpointAsync(
 		string spreadsheetId,

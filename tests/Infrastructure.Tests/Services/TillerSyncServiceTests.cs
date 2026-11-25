@@ -60,6 +60,37 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
+	public async Task ExecutorSnapshot_PreservesDistinctIdsAndReplaysWithoutUpstreamReads()
+	{
+		TillerSyncService service = CreateService(pageSize: 1);
+		List<TillerTransactionRow> rows = [
+			Row("first", "2026-10-01", "STORE", -9.99m),
+			Row("second", "2026-10-01", "STORE", -9.99m),
+		];
+
+		TillerSyncResult first = await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, CancellationToken.None);
+		first.Inserted.Should().Be(2);
+		TillerSyncResult replay = await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, CancellationToken.None);
+		replay.Inserted.Should().Be(0);
+		replay.Updated.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+		_clientMock.Verify(c => c.QueryTransactionsAsync(
+			It.IsAny<string>(), It.IsAny<TillerTransactionQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+	}
+
+	[Fact]
+	public async Task ExecutorSnapshot_RejectsRepeatedIdsAndWrongSourceBeforeWriting()
+	{
+		TillerSyncService service = CreateService();
+		TillerTransactionRow row = Row("first", "2026-10-01", "STORE", -9.99m);
+		Func<Task> repeated = () => service.ImportExecutorSnapshotAsync(Sheet, 2, [row, row], CancellationToken.None);
+		await repeated.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Repeated source transaction ID*");
+		Func<Task> wrongSource = () => service.ImportExecutorSnapshotAsync("wrong-sheet", 1, [row], CancellationToken.None);
+		await wrongSource.Should().ThrowAsync<InvalidOperationException>().WithMessage("*differs from selected spreadsheet*");
+		(await CanonicalCountAsync()).Should().Be(0);
+	}
+
+	[Fact]
 	public async Task SyncFull_PagesMultiPageHistory()
 	{
 		// Arrange
@@ -102,29 +133,28 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
-	public async Task PendingToPosted_ReconcilesToOneCanonicalRecord()
+	public async Task PendingAndPosted_DistinctSourceIdsAreNotMerged()
 	{
 		// Arrange
 		_rows.Add(Row("p-1", "2026-11-06", "WHOLEFDS MKT", -15.00m, status: "pending"));
 		TillerSyncService service = CreateService();
 		await service.SyncFullAsync(CancellationToken.None);
-		_rows.Clear();
 		_rows.Add(Row("t-9", "2026-11-06", "WHOLEFDS MKT", -15.00m, status: "posted"));
 
 		// Act
 		TillerSyncResult result = await service.SyncIncrementalAsync(CancellationToken.None);
 
 		// Assert
-		result.Reconciled.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
+		result.Reconciled.Should().Be(0);
+		result.Inserted.Should().Be(1);
+		(await CanonicalCountAsync()).Should().Be(2);
 		await using ApplicationDbContext context = _factory.CreateDbContext();
-		TillerTransactionEntity canon = await context.Set<TillerTransactionEntity>()
-			.SingleAsync(e => e.SupersededBy == null);
-		canon.ProviderTransactionId.Should().Be("t-9");
+		(await context.Set<TillerTransactionEntity>().ToListAsync())
+			.Select(e => e.ProviderTransactionId).Should().BeEquivalentTo("p-1", "t-9");
 	}
 
 	[Fact]
-	public async Task RedeliveredDuplicate_CollapsesWithoutNewRecord()
+	public async Task IdenticalPurchaseFacts_DistinctProviderIdsRemainDistinct()
 	{
 		// Arrange
 		_rows.Add(Row("t-1", "2026-10-01", "WHOLEFDS MKT", -9.99m));
@@ -136,12 +166,46 @@ public class TillerSyncServiceTests
 		TillerSyncResult result = await service.SyncIncrementalAsync(CancellationToken.None);
 
 		// Assert
-		result.Duplicates.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
-		// A third run must stay converged: the duplicate id is remembered.
+		result.Inserted.Should().Be(1);
+		(await CanonicalCountAsync()).Should().Be(2);
+		// A repeat read of the same IDs must stay converged.
 		TillerSyncResult again = await service.SyncIncrementalAsync(CancellationToken.None);
-		again.Duplicates.Should().Be(1);
-		(await CanonicalCountAsync()).Should().Be(1);
+		again.Inserted.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+	}
+
+	[Fact]
+	public async Task FullReconciliation_UpdatesOlderTransactions()
+	{
+		_rows.Add(Row("old", "2026-10-01", "STORE", -9.99m));
+		_rows.Add(Row("new", "2026-11-05", "STORE", -24.50m));
+		TillerSyncService service = CreateService();
+		await service.SyncFullAsync(CancellationToken.None);
+		_rows[0] = _rows[0] with { Category = "Dining" };
+
+		TillerSyncResult result = await service.SyncFullAsync(CancellationToken.None);
+
+		result.Updated.Should().Be(1);
+		result.Inserted.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerTransactionEntity>().SingleAsync(e => e.ProviderTransactionId == "old"))
+			.Category.Should().Be("Dining");
+	}
+
+	[Fact]
+	public async Task FullReconciliation_MissingSourceIdHoldsWithoutChangingCache()
+	{
+		_rows.Add(Row("old", "2026-10-01", "STORE", -9.99m));
+		TillerSyncService service = CreateService();
+		await service.SyncFullAsync(CancellationToken.None);
+		_rows.Clear();
+		_rows.Add(Row("new", "2026-11-05", "STORE", -24.50m));
+
+		Func<Task> act = () => service.SyncFullAsync(CancellationToken.None);
+		await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*omitted 1 cached transaction IDs*");
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerTransactionEntity>().SingleAsync()).ProviderTransactionId.Should().Be("old");
 	}
 
 	[Fact]
@@ -209,9 +273,10 @@ public class TillerSyncServiceTests
 			_factory, _clientMock.Object, _selectionMock.Object,
 			new Tiller.TillerClientOptions { DefaultPageSize = 1, MaxPageSize = 500 });
 
-		// Act: first attempt fails partway; retry with a healthy transport completes.
+		// Act: failed source scan writes no transaction rows; retry completes.
 		Func<Task> failing = () => service.SyncFullAsync(CancellationToken.None);
 		await failing.Should().ThrowAsync<HttpRequestException>();
+		(await CanonicalCountAsync()).Should().Be(0);
 		_clientMock.Setup(c => c.QueryTransactionsAsync(
 				It.IsAny<string>(), It.IsAny<TillerTransactionQuery>(), It.IsAny<CancellationToken>()))
 			.ReturnsAsync((string _, TillerTransactionQuery query, CancellationToken _) =>

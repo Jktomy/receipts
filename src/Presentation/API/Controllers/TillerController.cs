@@ -180,6 +180,59 @@ public class TillerController(
 		}
 	}
 
+	// Executor supplies the complete read-only Treasury scan. Disabled unless
+	// the deployment explicitly binds the one approved source spreadsheet.
+	[HttpPost("executor-snapshot")]
+	[RequireKeyScope(ApiKeyScopes.TillerConfirm)]
+	[RequestSizeLimit(20000000)]
+	public async Task<Results<Ok<TillerSyncResultDto>, BadRequestProblem, StatusCodeHttpResult>> ImportExecutorSnapshot(
+		[FromBody] ExecutorSnapshotRequest request,
+		[FromServices] ITillerSyncService sync,
+		[FromServices] Microsoft.Extensions.Configuration.IConfiguration configuration,
+		CancellationToken cancellationToken)
+	{
+		string? allowed = configuration["TILLER_EXECUTOR_SPREADSHEET_ID"];
+		if (string.IsNullOrWhiteSpace(allowed))
+		{
+			return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
+		}
+		if (!string.Equals(allowed, request.SpreadsheetId, StringComparison.Ordinal) || request.Rows is null || request.Rows.Any(r => r is null))
+		{
+			return ApiProblem.BadRequest("Snapshot source is not the approved spreadsheet or contains invalid rows.");
+		}
+		try
+		{
+			var rows = request.Rows.Select(r => new TillerTransactionRow(r.TransactionId, r.Date, r.Description,
+				r.Amount, r.Category, r.Account, r.Institution, r.Status, r.SplitGroupId)).ToList();
+			return TypedResults.Ok(mapper.ToSyncResultDto(await sync.ImportExecutorSnapshotAsync(allowed, request.Total, rows, cancellationToken)));
+		}
+		catch (InvalidOperationException)
+		{
+			return ApiProblem.BadRequest("Snapshot rejected; check source count, IDs, and sync status.");
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			logger.LogWarning("Executor snapshot import failed.");
+			return TypedResults.StatusCode(StatusCodes.Status503ServiceUnavailable);
+		}
+	}
+
+	public sealed record ExecutorSnapshotRequest(
+		[property: System.Text.Json.Serialization.JsonRequired] string SpreadsheetId,
+		[property: System.Text.Json.Serialization.JsonRequired] int Total,
+		[property: System.Text.Json.Serialization.JsonRequired] List<ExecutorSnapshotRow> Rows);
+
+	public sealed record ExecutorSnapshotRow(
+		[property: System.Text.Json.Serialization.JsonRequired] string TransactionId,
+		[property: System.Text.Json.Serialization.JsonRequired] DateOnly Date,
+		[property: System.Text.Json.Serialization.JsonRequired] string Description,
+		[property: System.Text.Json.Serialization.JsonRequired] decimal Amount,
+		string? Category,
+		[property: System.Text.Json.Serialization.JsonRequired] string Account,
+		[property: System.Text.Json.Serialization.JsonRequired] string Institution,
+		[property: System.Text.Json.Serialization.JsonRequired] string Status,
+		string? SplitGroupId);
+
 	[HttpGet("transactions")]
 	[EndpointSummary("List cached Tiller transactions")]
 	[EndpointDescription("Paged, filterable feed of locally cached Tiller rows with their current receipt-link overlay. Reads local cache only; performs no live Tiller call.")]

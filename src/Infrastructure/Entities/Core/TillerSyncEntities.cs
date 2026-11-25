@@ -35,8 +35,8 @@ public class TillerKnownIdEntity
 }
 
 // Durable resume point per spreadsheet. Completed=false means a run was
-// interrupted; the next run resumes from SyncedThroughDate instead of
-// restarting, which is what makes retries duplicate-free.
+// interrupted; the next run replays source history by stable transaction ID.
+// Successful checkpoints report the source date, not an edit timestamp.
 public class TillerCheckpointEntity
 {
 	public Guid Id { get; set; }
