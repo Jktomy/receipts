@@ -267,6 +267,34 @@ export function qualifyItemization(raw, ocrText) {
   };
 }
 
+
+/** Repair only two unambiguous formatting failures on an already released OCR
+ * revision. All other errors remain held, and the unchanged validator must
+ * accept the entire result before it can replace the original draft. */
+export function repairOrdinaryDraftFormatting(raw, ocrText) {
+  const initial = qualifyItemization(raw, ocrText);
+  const repairable = new Set(["Grand total or tax is invalid", "Item lacks verbatim source evidence"]);
+  if (initial.ok || initial.problems.some(p => !repairable.has(p)) ||
+      raw.hasRefunds === true || raw.mixedTender === true) return raw;
+  const candidate = { ...raw, items: raw.items.map(item => {
+    const evidence = typeof item.evidence === "string" ? item.evidence.trim() : "";
+    const lines = evidence.split(/\r?\n/);
+    if (lines.length !== 2 || lines[0] !== item.description ||
+        !ocrText.includes(evidence) || !/^\$?\d+(?:\.\d{1,2})?$/.test(lines[1].trim())) return item;
+    try {
+      if (moneyCents(lines[1].trim().replace(/^\$/, "")) !== moneyCents(item.total)) return item;
+    } catch { return item; }
+    return { ...item, evidence: lines[0] };
+  }) };
+  // A blank tax field is not proof of a tax charge. Use zero additional tax
+  // only when there is no printed tax marker and the exact full receipt math
+  // already reconciles; the complete validator independently enforces this.
+  if (candidate.tax === "" && !/\b(?:tax(?:es)?|vat|gst|hst|pst)\b/i.test(ocrText)) {
+    candidate.tax = "0.00";
+  }
+  return qualifyItemization(candidate, ocrText).ok ? candidate : raw;
+}
+
 export const LOW_CONFIDENCE_PROBLEM = "Model did not attest high confidence";
 
 export function attestationDigest(ocrText) {

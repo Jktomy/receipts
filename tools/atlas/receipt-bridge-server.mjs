@@ -7,6 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
   importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport,
+  repairOrdinaryDraftFormatting,
   verifyFinalOcr, classifyRoutes, probeSourceStatus
 } from "./receipt-bridge-core.mjs";
 
@@ -168,8 +169,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         if (!a.ok) return null;
         binding = a.binding ?? null;
       }
+      const draft = sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, proven.content));
       return {
-        parsed: sanitizePurchaseDraft(await extractUsingOpenLyric(fetcher, config, proven.content)),
+        parsed: config.finalizationMode === "strict" ? repairOrdinaryDraftFormatting(draft, proven.content) : draft,
         evidence: gate.evidence ?? null,
         proven, binding
       };
