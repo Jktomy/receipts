@@ -53,6 +53,17 @@ describe("TillerConnectionCard", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
+  it("identifies the delivered snapshot rather than claiming a direct connection", () => {
+    vi.mocked(useTillerConnection).mockReturnValue(mockQueryResult({
+      data: { isConfigured: true, isConnected: true, selectedSpreadsheetId: "s-1",
+        lastSuccessfulSyncUtc: "2026-11-25T12:00:00Z", executorManaged: true },
+      isSuccess: true, isPending: false, isLoading: false,
+    }));
+    renderWithQueryClient(<TillerConnectionCard />);
+    expect(screen.getByText("Hourly sync current")).toBeInTheDocument();
+    expect(screen.getByText(/managed by Atlas hourly/i)).toBeInTheDocument();
+  });
+
   it("summarizes the connected state", () => {
     vi.mocked(useTillerConnection).mockReturnValue(
       mockQueryResult({

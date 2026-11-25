@@ -16,7 +16,7 @@ import {
   useTillerSpreadsheets,
 } from "@/hooks/useTillerSpreadsheets";
 
-export function TillerSpreadsheetCard() {
+export function TillerSpreadsheetCard({ executorManaged = false }: { executorManaged?: boolean } = {}) {
   const spreadsheetsQuery = useTillerSpreadsheets();
   const selectedQuery = useSelectedTillerSpreadsheet();
   const selectMutation = useSelectTillerSpreadsheet();
@@ -67,7 +67,9 @@ export function TillerSpreadsheetCard() {
         <CardTitle>Tiller spreadsheet</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {spreadsheets.length === 0 ? (
+        {executorManaged ? (
+          <p className="text-sm">{spreadsheets.find((sheet) => sheet.spreadsheetId === selected)?.title ?? selected} · Managed by Atlas</p>
+        ) : spreadsheets.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No Tiller spreadsheets found. This is normal before the first
             connection.

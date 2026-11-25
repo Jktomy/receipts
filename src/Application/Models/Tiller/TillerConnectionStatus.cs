@@ -4,4 +4,5 @@ public sealed record TillerConnectionStatus(
 	bool IsConfigured,
 	bool IsConnected,
 	string? SelectedSpreadsheetId,
-	DateTimeOffset? LastSuccessfulSyncUtc);
+	DateTimeOffset? LastSuccessfulSyncUtc,
+	bool ExecutorManaged = false);

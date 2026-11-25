@@ -86,6 +86,17 @@ function mockQueries() {
 }
 
 describe("TillerAccountMappingsCard", () => {
+  it("shows the linked read-only account catalog without creating accounts", () => {
+    mockQueries();
+    const mutate = vi.fn();
+    vi.mocked(useCreateTillerAccountMapping).mockReturnValue(mockMutationResult({ mutate }));
+    vi.mocked(useDeleteTillerAccountMapping).mockReturnValue(mockMutationResult({}));
+    renderWithQueryClient(<TillerAccountMappingsCard executorManaged />);
+    expect(screen.getByText("1 linked Tiller accounts · Read-only")).toBeInTheDocument();
+    expect(screen.getByText("Bank")).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it("creates with the serialized mapping shape", async () => {
     mockQueries();
     const mutate = vi.fn();

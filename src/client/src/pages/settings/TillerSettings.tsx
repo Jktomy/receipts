@@ -3,6 +3,7 @@ import { TillerAccountMappingsCard } from "@/components/tiller/TillerAccountMapp
 import { TillerConnectionCard } from "@/components/tiller/TillerConnectionCard";
 import { TillerSpreadsheetCard } from "@/components/tiller/TillerSpreadsheetCard";
 import { TillerSyncCard } from "@/components/tiller/TillerSyncCard";
+import { useTillerConnection } from "@/hooks/useTillerConnection";
 import { usePageTitle } from "@/hooks/usePageTitle";
 
 /**
@@ -13,6 +14,7 @@ import { usePageTitle } from "@/hooks/usePageTitle";
  */
 export default function TillerSettings() {
   usePageTitle("Tiller Settings");
+  const executorManaged = useTillerConnection().data?.executorManaged === true;
 
   return (
     <div className="space-y-6">
@@ -23,9 +25,9 @@ export default function TillerSettings() {
         Bank rows never become receipt items here; unmatched rows are normal.
       </p>
       <TillerConnectionCard />
-      <TillerSpreadsheetCard />
-      <TillerAccountMappingsCard />
-      <TillerSyncCard />
+      <TillerSpreadsheetCard executorManaged={executorManaged} />
+      <TillerAccountMappingsCard executorManaged={executorManaged} />
+      <TillerSyncCard executorManaged={executorManaged} />
     </div>
   );
 }

@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Application.Interfaces.Services;
 using Application.Models.Tiller;
 using Infrastructure.Entities.Core;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace Infrastructure.Services;
 
@@ -10,7 +12,8 @@ namespace Infrastructure.Services;
 // the live readable list so scope can never drift to an unknown sheet.
 public class TillerSelectionService(
 	IDbContextFactory<ApplicationDbContext> contextFactory,
-	ITillerApiClient tillerApiClient) : ITillerSelectionService
+	ITillerApiClient tillerApiClient,
+	IConfiguration? configuration = null) : ITillerSelectionService
 {
 	public async Task<string?> GetSelectedSpreadsheetIdAsync(CancellationToken cancellationToken)
 	{
@@ -21,8 +24,27 @@ public class TillerSelectionService(
 		return row?.SpreadsheetId;
 	}
 
+	public async Task<TillerExecutorMetadata?> GetExecutorMetadataAsync(CancellationToken cancellationToken)
+	{
+		string? approved = configuration?["TILLER_EXECUTOR_SPREADSHEET_ID"];
+		if (string.IsNullOrWhiteSpace(approved))
+		{
+			return null;
+		}
+		await using ApplicationDbContext context = contextFactory.CreateDbContext();
+		TillerSelectedSpreadsheetEntity? row = await context.Set<TillerSelectedSpreadsheetEntity>()
+			.AsNoTracking().SingleOrDefaultAsync(e => e.SpreadsheetId == approved, cancellationToken);
+		return row?.ExecutorMetadataJson is string json
+			? JsonSerializer.Deserialize<TillerExecutorMetadata>(json)
+			: null;
+	}
+
 	public async Task SelectSpreadsheetAsync(string spreadsheetId, CancellationToken cancellationToken)
 	{
+		if (!string.IsNullOrWhiteSpace(configuration?["TILLER_EXECUTOR_SPREADSHEET_ID"]))
+		{
+			throw new ArgumentException("Spreadsheet selection is managed by the existing Executor synchronization.", nameof(spreadsheetId));
+		}
 		if (string.IsNullOrWhiteSpace(spreadsheetId))
 		{
 			throw new ArgumentException("spreadsheetId is required.", nameof(spreadsheetId));
@@ -68,6 +90,10 @@ public class TillerSelectionService(
 		}
 		else
 		{
+			if (!string.Equals(row.SpreadsheetId, spreadsheetId, StringComparison.Ordinal))
+			{
+				row.ExecutorMetadataJson = null;
+			}
 			row.SpreadsheetId = spreadsheetId;
 			row.UpdatedAt = DateTimeOffset.UtcNow;
 		}

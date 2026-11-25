@@ -5,6 +5,7 @@ using Infrastructure.Entities.Core;
 using Infrastructure.Services;
 using Infrastructure.Tests.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Moq;
 
 namespace Infrastructure.Tests.Services;
@@ -87,6 +88,41 @@ public class TillerSyncServiceTests
 		await repeated.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Repeated source transaction ID*");
 		Func<Task> wrongSource = () => service.ImportExecutorSnapshotAsync("wrong-sheet", 1, [row], CancellationToken.None);
 		await wrongSource.Should().ThrowAsync<InvalidOperationException>().WithMessage("*differs from selected spreadsheet*");
+		(await CanonicalCountAsync()).Should().Be(0);
+	}
+
+	[Fact]
+	public async Task ExecutorSnapshot_CatalogUpdatesByStableIdWithoutCreatingManualAccounts()
+	{
+		TillerSyncService service = CreateService();
+		List<TillerTransactionRow> rows = [Row("first", "2026-10-01", "STORE", -9.99m)];
+		TillerExecutorMetadata metadata = new(new TillerSpreadsheet(Sheet, "Treasury", true, true, 2),
+			[new TillerAccount("a1", "Checking", "Bank", "checking", "asset"),
+				new TillerAccount("a2", "Checking", "Bank", "checking", "asset")]);
+		await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, metadata, CancellationToken.None);
+		TillerExecutorMetadata renamed = metadata with { Accounts = [metadata.Accounts[0] with { DisplayName = "Renamed" }, metadata.Accounts[1]] };
+		await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, renamed, CancellationToken.None);
+		await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, CancellationToken.None);
+		var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(
+			new Dictionary<string, string?> { ["TILLER_EXECUTOR_SPREADSHEET_ID"] = Sheet }).Build();
+		var selection = new TillerSelectionService(_factory, _clientMock.Object, configuration);
+		TillerExecutorMetadata? stored = await selection.GetExecutorMetadataAsync(CancellationToken.None);
+		stored.Should().BeEquivalentTo(renamed);
+		(await CanonicalCountAsync()).Should().Be(1);
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<AccountEntity>().CountAsync()).Should().Be(0);
+		_clientMock.VerifyNoOtherCalls();
+	}
+
+	[Fact]
+	public async Task ExecutorSnapshot_InvalidCatalogRejectedBeforeTransactionWrites()
+	{
+		TillerSyncService service = CreateService();
+		TillerAccount account = new("a1", "Checking", "Bank", "checking", "asset");
+		TillerExecutorMetadata invalid = new(new TillerSpreadsheet(Sheet, "Treasury", true, true, 2), [account, account]);
+		List<TillerTransactionRow> rows = [Row("first", "2026-10-01", "STORE", -9.99m)];
+		Func<Task> act = async () => await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, invalid, CancellationToken.None);
+		await act.Should().ThrowAsync<InvalidOperationException>();
 		(await CanonicalCountAsync()).Should().Be(0);
 	}
 
