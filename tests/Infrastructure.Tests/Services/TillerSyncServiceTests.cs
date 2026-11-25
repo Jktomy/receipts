@@ -60,6 +60,37 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
+	public async Task ExecutorSnapshot_PreservesDistinctIdsAndReplaysWithoutUpstreamReads()
+	{
+		TillerSyncService service = CreateService(pageSize: 1);
+		List<TillerTransactionRow> rows = [
+			Row("first", "2026-10-01", "STORE", -9.99m),
+			Row("second", "2026-10-01", "STORE", -9.99m),
+		];
+
+		TillerSyncResult first = await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, CancellationToken.None);
+		first.Inserted.Should().Be(2);
+		TillerSyncResult replay = await service.ImportExecutorSnapshotAsync(Sheet, rows.Count, rows, CancellationToken.None);
+		replay.Inserted.Should().Be(0);
+		replay.Updated.Should().Be(0);
+		(await CanonicalCountAsync()).Should().Be(2);
+		_clientMock.Verify(c => c.QueryTransactionsAsync(
+			It.IsAny<string>(), It.IsAny<TillerTransactionQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+	}
+
+	[Fact]
+	public async Task ExecutorSnapshot_RejectsRepeatedIdsAndWrongSourceBeforeWriting()
+	{
+		TillerSyncService service = CreateService();
+		TillerTransactionRow row = Row("first", "2026-10-01", "STORE", -9.99m);
+		Func<Task> repeated = () => service.ImportExecutorSnapshotAsync(Sheet, 2, [row, row], CancellationToken.None);
+		await repeated.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Repeated source transaction ID*");
+		Func<Task> wrongSource = () => service.ImportExecutorSnapshotAsync("wrong-sheet", 1, [row], CancellationToken.None);
+		await wrongSource.Should().ThrowAsync<InvalidOperationException>().WithMessage("*differs from selected spreadsheet*");
+		(await CanonicalCountAsync()).Should().Be(0);
+	}
+
+	[Fact]
 	public async Task SyncFull_PagesMultiPageHistory()
 	{
 		// Arrange
