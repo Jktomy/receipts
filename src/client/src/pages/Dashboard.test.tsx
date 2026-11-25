@@ -18,6 +18,10 @@ vi.mock("@/components/dashboard/DateRangeSelector", () => ({
   DateRangeSelector: () => <div data-testid="date-range-selector" />,
 }));
 
+vi.mock("@/components/dashboard/TillerTransactionFeed", () => ({
+  TillerTransactionFeed: () => <div data-testid="tiller-transaction-feed" />,
+}));
+
 vi.mock("@/components/dashboard/SummaryStats", () => ({
   SummaryStats: ({ categoryView }: { categoryView: string }) => (
     <div data-testid="summary-stats" data-category-view={categoryView} />
@@ -64,6 +68,7 @@ describe("Dashboard", () => {
 
   it("renders all widget sections", () => {
     renderWithQueryClient(<Dashboard />);
+    expect(screen.getByTestId("tiller-transaction-feed")).toBeInTheDocument();
     expect(screen.getByTestId("summary-stats")).toBeInTheDocument();
     expect(screen.getByTestId("spending-over-time")).toBeInTheDocument();
     expect(screen.getByTestId("spending-by-category")).toBeInTheDocument();
