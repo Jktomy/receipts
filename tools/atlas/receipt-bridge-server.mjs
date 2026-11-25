@@ -7,7 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   getPaperlessText, extractUsingOpenLyric, qualifyItemization, sanitizePurchaseDraft,
   importQualifiedReceipt, getFireflyWithdrawals, suggestFireflyLink, authorizeImport,
-  verifyFinalOcr, evaluateReleaseBinding, fetchNativeHistory, classifyRoutes, probeSourceStatus
+  verifyFinalOcr, classifyRoutes, probeSourceStatus
 } from "./receipt-bridge-core.mjs";
 
 function validSecret(actual, expected) {
@@ -22,15 +22,12 @@ function bodyError(message, statusCode) {
   return error;
 }
 
-// Caller-supplied release observations are NOT accepted as authority: exact
-// content-hash knowledge proves observation, not authorization, and native
-// Paperless carries no tag-to-version binding. Release binds through native
-// tag history + version records only (see fetchNativeReleaseInputs and
-// evaluateReleaseBinding). A fire carrying a `release` claim is rejected
-// outright so no one mistakes it for an honored channel.
+// ReHarvest alone authorizes assignment of the destination tag. Trust the
+// existing authenticated Paperless workflow and re-read native source state.
+// Caller-supplied release claims or tags are never accepted as evidence.
 function rejectReleaseClaim(body) {
   if (body?.release !== undefined && body?.release !== null) {
-    throw bodyError("Release observations are not accepted here; release binds through native Paperless history only", 400);
+    throw bodyError("Release observations are not accepted here; use the authenticated Paperless destination-tag workflow", 400);
   }
 }
 
@@ -38,6 +35,14 @@ function docIdOf(body) {
   const id = Number(body?.documentId ?? body?.sourceId ?? body?.id);
   if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647) throw bodyError("Valid Paperless document ID required", 400);
   return id;
+}
+
+// A tag is document-scoped; preserve the observed OCR and native file revision
+// across finalization, extraction and import. Missing version evidence holds.
+function sameSourceRevision(a, b) {
+  return Boolean(a?.contentHash && a.contentHash === b?.contentHash &&
+    Array.isArray(a.versions) && a.versions.length &&
+    Array.isArray(b.versions) && JSON.stringify(a.versions) === JSON.stringify(b.versions));
 }
 
 function statePath(dir, id) { return join(dir, "paperless-" + id + ".json"); }
@@ -122,6 +127,10 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     }
   }
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  // These are the existing native Atlas Hold/Clone tag IDs, not new gates.
+  if (Number(config.requiredTagId) === 14) {
+    config = { ...config, blockedTagIds: [...new Set([...(config.blockedTagIds ?? []), 28, 29])] };
+  }
   const active = new Set();
 
   // Post-OCR finalization gate: an Updated event is a signal, never proof.
@@ -129,43 +138,23 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
   // (settled tasks + stable revision + Paperless-AI done) BEFORE any model
   // call. Unproven documents fail closed to manual review with zero model
   // calls and no draft. Returns the sanitized draft, or null when gated.
-  // Native release admission for first extraction. Fetches native tag history
-  // and evaluates the adapter predicate against the PROVEN revision. Any
-  // unproven input (unreachable/unshaped history, missing versions, no
-  // authorized add at/after the version floor, later removal, empty authorized
-  // set under R20 HOLD) denies with an explicit reason and zero model calls.
-  // The authorized set defaults to empty (deny-all); populating it requires a
-  // separately authorized release procedure, which does not currently exist.
-  async function admitRelease(docId, proven, gateEvidence) {
-    let history = null;
-    let historyProblem = "unavailable";
-    try {
-      history = await fetchNativeHistory(fetcher, config, docId);
-    } catch (error) {
-      history = null;
-      historyProblem = error instanceof Error ? error.message : String(error);
-    }
-    const decision = evaluateReleaseBinding({
-      currentTags: proven.tags,
-      history,
-      versions: proven.versions ?? null,
-      bridgeContentHash: proven.contentHash,
-      authorizedReleasers: config.authorizedReleaserIds ?? [],
-      requiredTagId: config.requiredTagId,
-      blockedTagIds: config.blockedTagIds ?? []
-    });
-    if (!decision.allow) {
+  // HealthLog-style native handoff: the destination tag is the release
+  // signal. The bridge has no owner/audit-history permissions. ReHarvest
+  // owns actor authorization and pre-release review; the receiver owns
+  // revision consistency, protected exclusions and idempotent import.
+  async function admitRelease(docId, initial, proven, gateEvidence) {
+    const current = await getPaperlessText(fetcher, config, docId);
+    if (!sameSourceRevision(initial, proven) || !sameSourceRevision(proven, current)) {
       const old = getState(dataDir, docId);
-      const why = history === null ? historyProblem : decision.reason;
       setState(dataDir, docId, {
         ...(old ?? { paperlessId: docId }),
         status: "RELEASE_UNPROVEN_REVIEW",
-        reason: ("Current-version release unproven: " + why + "; extraction held with zero model calls").slice(0, 300),
+        reason: "Source revision changed or is unavailable during finalization; review and release the current source",
         finalization: { mode: config.finalizationMode ?? "off", ok: true, evidence: gateEvidence ?? null }
       });
       return { ok: false };
     }
-    return { ok: true, binding: { floor: new Date(decision.floor).toISOString(), qualifyingAdds: decision.qualifyingAdds } };
+    return { ok: true, binding: { method: "authenticated-destination-tag" } };
   }
 
   async function runFinalizationGate(id, source, admit = null) {
@@ -212,7 +201,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         setState(dataDir, id, { ...state, sourceStatus: markAvailable() });
         return;
       }
-      if (previous?.draft && source.contentHash === previous.contentHash) {
+      if (previous?.draft && sameSourceRevision(source, previous)) {
         // Same OCR revision: never auto-clear a review state or discard corrections.
         if (previous.status === "RELEASE_STALE_REVIEW") {
           // Source reverted to the released revision the draft was built from:
@@ -233,8 +222,6 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         // Any payment confirmation is void: it was checked against the old source.
         setState(dataDir, id, {
           ...previous,
-          contentHash: source.contentHash,
-          modified: source.modified,
           status: "SOURCE_CHANGED_REVIEW",
           sourceStatus: markAvailable(),
           reason: "Paperless OCR text changed after review: saved corrections need re-check",
@@ -267,7 +254,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       // same-hash re-fires return early, changed revisions are held above).
       // The admit callback runs after the finalization wait so the bound
       // revision is the proven one.
-      const gated = await runFinalizationGate(id, source, (proven, gateEvidence) => admitRelease(id, proven, gateEvidence));
+      const gated = await runFinalizationGate(id, source, (proven, gateEvidence) => admitRelease(id, source, proven, gateEvidence));
       if (!gated) return;
       const parsed = gated.parsed;
       // Qualify and store the PROVEN revision: the gate may have waited
@@ -278,12 +265,11 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       // re-fetch; a blocked tag throws here before any model call or draft.
       const routes = classifyRoutes(source.tags, config);
       const state = {
-        paperlessId: id, contentHash: source.contentHash, modified: source.modified,
+        paperlessId: id, contentHash: source.contentHash, modified: source.modified, versions: source.versions,
         sourceStatus: markAvailable(),
         status: qualified.ok ? "READY_FOR_REVIEW" : "REVIEW_REQUIRED",
         problems: qualified.problems, routes,
-        // Native binding that admitted this extraction (floor + qualifying
-        // adds). Audit trail only; re-verified on every import.
+        // Record the handoff method; source revision and tags are re-read before import.
         releaseBinding: gated.binding ?? null,
         draftRevision: (previous?.draftRevision ?? 0) + 1,
         reviewerEdited: false,
@@ -295,6 +281,12 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
       // opt-in AND all independent OCR evidence/decimal checks to pass.
       // Firefly is not modified in either mode.
       if (config.autoImport === true && qualified.ok) {
+        // Extraction can take time. Never write a changed or revoked source.
+        const current = await getPaperlessText(fetcher, config, id);
+        if (!sameSourceRevision(source, current)) {
+          setState(dataDir, id, { ...state, status: "RELEASE_STALE_REVIEW", reason: "Source revision changed during extraction; review required" });
+          return;
+        }
         const saved = await importQualifiedReceipt(fetcher, config, qualified, id);
         state.status = "IMPORTED";
         state.receiptId = saved.receiptId;
@@ -340,36 +332,14 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", sourceStatus: tier, reason: "Paperless source or release changed before import: reprocess before saving", confirmedFireflyTransactionId: null, confirmedAt: null });
         return { status: 409, result: { error: "Paperless source or release changed: reprocess before saving" } };
       }
-      if (current.contentHash !== saved.contentHash) {
+      if (!sameSourceRevision(current, saved)) {
         // The checked source is gone: block the import and void any payment
         // confirmation checked against the old revision.
         setState(dataDir, id, { ...saved, status: "SOURCE_CHANGED_REVIEW", sourceStatus: markAvailable(), reason: "OCR revision changed before import", confirmedFireflyTransactionId: null, confirmedAt: null });
         return { status: 409, result: { error: "Paperless OCR revision changed: reprocess before saving" } };
       }
-      // Native release binding at import: the destination tag alone (even
-      // still present) does not authorize this revision. Denial leaves the
-      // draft intact for retry after native re-release; zero destination writes.
-      {
-        let importHistory = null;
-        try {
-          importHistory = await fetchNativeHistory(fetcher, config, id);
-        } catch {
-          importHistory = null;
-        }
-        const binding = evaluateReleaseBinding({
-          currentTags: current.tags,
-          history: importHistory,
-          versions: current.versions ?? null,
-          bridgeContentHash: current.contentHash,
-          documentModified: current.modified ?? null,
-          authorizedReleasers: config.authorizedReleaserIds ?? [],
-          requiredTagId: config.requiredTagId,
-          blockedTagIds: config.blockedTagIds ?? []
-        });
-        if (!binding.allow) {
-          return { status: 409, result: { error: "Current-version release unproven for import: " + binding.reason + "; zero destination writes" } };
-        }
-      }
+      // The native source read above enforces the current destination tag,
+      // protected exclusions, and the exact observed OCR/file revision.
       const qualified = qualifyItemization(saved.draft, current.content);
       // A low-confidence extraction is importable only with an approval bound to
       // this draft revision and this exact OCR text, from a reviewer distinct
@@ -545,14 +515,14 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
         // required/release/blocked tags; the human's correction is the
         // freshness attestation the bridge cannot observe natively.
         let baseline = previous;
-        if (previous.status === "RELEASE_STALE_REVIEW") {
+        if (["RELEASE_STALE_REVIEW", "SOURCE_CHANGED_REVIEW"].includes(previous.status)) {
           let current;
           try {
             current = await getPaperlessText(fetcher, config, id);
           } catch (error) {
             return safeJson(response, 409, { error: "Current source or release changed: re-check before saving" });
           }
-          baseline = { ...previous, contentHash: current.contentHash, modified: current.modified, versions: current.versions ?? previous.versions ?? null };
+          baseline = { ...previous, contentHash: current.contentHash, modified: current.modified, versions: current.versions ?? null };
         }
         const draftRevision = (baseline.draftRevision ?? 0) + 1;
         // Still checked against immutable OCR evidence at import time.

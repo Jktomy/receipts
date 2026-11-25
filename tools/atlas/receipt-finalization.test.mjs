@@ -160,15 +160,11 @@ test("protected tags are denied before any finalization check", async () => {
   assert.equal(h.stats().aiCalls, 0);
 });
 
-test("strict mode drafts from the proven revision, not the superseded original", async () => {
+test("strict mode holds a source that changes after the initial release observation", async () => {
   const h = harness({ ai: "done", flipContent: (n, c) => (n === 2 ? c + "\nFEE 1.00" : c) });
   const s = await drive(h);
-  assert.equal(s.status, "READY_FOR_REVIEW");
-  assert.equal(h.stats().modelCalls, 1);
-  const provenContent = ocr + "\nFEE 1.00";
-  const provenHash = createHash("sha256").update(provenContent, "utf8").digest("hex");
-  assert.equal(s.contentHash, provenHash);
-  assert.ok(h.oathgateBodies.some((b) => b.includes("FEE 1.00")), "model must see the proven revision");
+  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.equal(h.stats().modelCalls, 0);
 });
 
 test("Paperless-AI history bound to another document fails closed", async () => {
