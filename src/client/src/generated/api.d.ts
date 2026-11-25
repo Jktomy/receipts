@@ -3465,6 +3465,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tiller/executor-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import an Executor-supplied Tiller snapshot
+         * @description Accepts a complete read-only Treasury scan supplied by Executor. Disabled unless the deployment binds the one approved source spreadsheet; rejects other sources. Creates no scheduler, worker, or upstream writes.
+         */
+        post: operations["Tiller_ImportExecutorSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tiller/transactions": {
         parameters: {
             query?: never;
@@ -7689,6 +7709,25 @@ export interface components {
          * @enum {string}
          */
         EnvelopeSource: "default" | "receipt" | "item" | "historical";
+        ExecutorSnapshotRequest: {
+            spreadsheetId: string;
+            /** Format: int32 */
+            total: number | string;
+            rows: components["schemas"]["ExecutorSnapshotRow"][];
+        };
+        ExecutorSnapshotRow: {
+            transactionId: string;
+            /** Format: date */
+            date: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            category: null | string;
+            account: string;
+            institution: string;
+            status: string;
+            splitGroupId: null | string;
+        };
         ItemTypeEnvelopeDefaultResponse: {
             /**
              * Format: uuid
@@ -14112,6 +14151,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Revision or provenance conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     GetAllReceipts: {
@@ -14443,6 +14491,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Revision or provenance conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
         };
     };
@@ -16037,6 +16094,15 @@ export interface operations {
                     "application/json": components["schemas"]["CreateApiKeyResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     RevokeApiKey: {
@@ -17410,6 +17476,50 @@ export interface operations {
                 "application/json": components["schemas"]["SyncTillerRequest"];
                 "text/json": components["schemas"]["SyncTillerRequest"];
                 "application/*+json": components["schemas"]["SyncTillerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TillerSyncResultDto"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    Tiller_ImportExecutorSnapshot: {
+        parameters: {
+            query?: never;
+            header?: {
+                "api-version"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutorSnapshotRequest"];
+                "text/json": components["schemas"]["ExecutorSnapshotRequest"];
+                "application/*+json": components["schemas"]["ExecutorSnapshotRequest"];
             };
         };
         responses: {
