@@ -133,11 +133,9 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
   }
   const active = new Set();
 
-  // Post-OCR finalization gate: an Updated event is a signal, never proof.
-  // In strict mode the bridge requires doc-ID-bound completion evidence
-  // (settled tasks + stable revision + Paperless-AI done) BEFORE any model
-  // call. Unproven documents fail closed to manual review with zero model
-  // calls and no draft. Returns the sanitized draft, or null when gated.
+  // The authorized destination tag is assigned upstream after OCR is ready.
+  // Strict mode verifies the released Paperless revision before any model call.
+  // Unproven or changed revisions fail closed without extraction.
   // HealthLog-style native handoff: the destination tag is the release
   // signal. The bridge has no owner/audit-history permissions. ReHarvest
   // owns actor authorization and pre-release review; the receiver owns
@@ -179,7 +177,7 @@ export function createAtlasBridge(config, { fetcher = globalThis.fetch, dataDir 
     const old = getState(dataDir, id);
     setState(dataDir, id, {
       ...(old ?? { paperlessId: id }),
-      status: "REVIEW_REQUIRED",
+      status: gate.revisionChanged ? "RELEASE_UNPROVEN_REVIEW" : "REVIEW_REQUIRED",
       reason: gate.reason.slice(0, 160),
       finalization: { mode: gate.mode, ok: false }
     });
@@ -615,8 +613,6 @@ if (process.argv[1] && /(?:^|[\\/])receipt-bridge-server\.mjs$/.test(process.arg
     allowCloudProcessing: process.env.ATLAS_ALLOW_CLOUD_RECEIPT_PROCESSING === "1",
     autoImport: process.env.ATLAS_AUTO_IMPORT_ENABLED === "1",
     finalizationMode: process.env.ATLAS_FINALIZATION_MODE === "strict" ? "strict" : "off",
-    paperlessAiUrl: process.env.ATLAS_PAPERLESS_AI_URL || undefined,
-    paperlessAiToken: process.env.ATLAS_PAPERLESS_AI_TOKEN_FILE ? secret("ATLAS_PAPERLESS_AI_TOKEN") : undefined,
     finalizationMaxAttempts: Number(process.env.ATLAS_FINALIZATION_MAX_ATTEMPTS || 6),
     finalizationIntervalMs: Number(process.env.ATLAS_FINALIZATION_INTERVAL_MS || 5000),
     finalizationStableReads: Number(process.env.ATLAS_FINALIZATION_STABLE_READS || 2)

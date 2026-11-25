@@ -1,5 +1,4 @@
-// TDD RED: finalization gate — an Updated event is a SIGNAL, not proof.
-// Strict mode must fail closed until doc-ID-bound completion evidence exists.
+// Strict mode trusts the upstream authorized release and checks Paperless revision stability.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -21,7 +20,7 @@ const good = {
   adjustments: []
 };
 
-function harness({ tags = [77], ai = null, flipContent = null } = {}) {
+function harness({ tags = [77], ai = null, flipContent = null, alterDoc = null } = {}) {
   let modelCalls = 0, aiCalls = 0, paperlessReads = 0, docReads = 0, content = ocr;
   const calls = [];
   const oathgateBodies = [];
@@ -30,57 +29,22 @@ function harness({ tags = [77], ai = null, flipContent = null } = {}) {
     calls.push({ host: url.host, pathname: url.pathname, headers: { ...(options.headers ?? {}) } });
     if (url.host === "paperless.test") {
       paperlessReads++;
-      if (url.pathname.startsWith("/api/tasks")) {
-        return new Response(JSON.stringify({ count: 0, next: null, previous: null, results: [] }), { status: 200 });
-      }
+      if (url.pathname.startsWith("/api/tasks")) throw new Error("Forbidden task dependency");
       if (/\/api\/documents\/\d+\/history\/?$/.test(url.pathname)) {
         return new Response(JSON.stringify(
           [{ action: "update", tagsOp: "add", tagsObjects: [77], ts: "2026-11-20T22:00:01Z", actorId: 2 }]), { status: 200 });
       }
       docReads++;
       if (flipContent) content = flipContent(docReads, content);
-      return new Response(JSON.stringify(
-        { id: 9501, tags, modified: "2026-11-20T22:00:00Z", content, versions: [{ added: "2026-11-20T22:00:00Z" }] }), { status: 200 });
+      const doc = { id: 9501, tags, modified: "2026-11-20T22:00:00Z", content, versions: [{ added: "2026-11-20T22:00:00Z" }] };
+      return new Response(JSON.stringify(alterDoc ? alterDoc(docReads, doc) : doc), { status: 200 });
     }
     if (url.host === "oathgate.test") {
       modelCalls++;
       try { oathgateBodies.push(String(options.body ?? "")); } catch { /* ignore */ }
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(good) } }] }), { status: 200 });
     }
-    if (url.host === "ai.test") {
-      aiCalls++;
-      const state = typeof ai === "function" ? ai(aiCalls) : ai;
-      if (url.pathname === "/api/processing/status") {
-        return new Response(JSON.stringify(
-          { running: true, current: state === "processing" ? [{ documentId: 9501 }] : [], queuedDocumentIds: [] }), { status: 200 });
-      }
-      if (url.pathname === "/api/ocr/documents/9501") {
-        if (state === "ocr-pending") {
-          return new Response(JSON.stringify(
-            { id: 9501, ocr: { status: "running", writtenBack: false, revertedAt: null } }), { status: 200 });
-        }
-        if (state === "not-written") {
-          return new Response(JSON.stringify(
-            { id: 9501, ocr: { status: "done", writtenBack: false, revertedAt: null } }), { status: 200 });
-        }
-        if (state === "reverted") {
-          return new Response(JSON.stringify(
-            { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: "2026-11-21T00:00:00Z" } }), { status: 200 });
-        }
-        return new Response(JSON.stringify(
-          { id: 9501, ocr: { status: "done", writtenBack: true, revertedAt: null } }), { status: 200 });
-      }
-      if (url.pathname === "/api/history") {
-        if (state === "wrongdoc") {
-          return new Response(JSON.stringify({ items: [{ documentId: 9999, revertedAt: null }] }), { status: 200 });
-        }
-        if (state === "reverted") {
-          return new Response(JSON.stringify({ items: [{ documentId: 9501, revertedAt: "2026-11-21T00:00:00Z" }] }), { status: 200 });
-        }
-        return new Response(JSON.stringify(
-          { items: (state === "done" || state === "processing") ? [{ documentId: 9501, revertedAt: null }] : [] }), { status: 200 });
-      }
-    }
+    if (url.host === "ai.test") { aiCalls++; throw new Error("Forbidden AI dependency"); }
     throw new Error("UNEXPECTED " + target);
   };
   const config = {
@@ -114,135 +78,71 @@ async function drive(h, docId = 9501) {
   throw new Error("timeout waiting for settle");
 }
 
-test("strict mode without AI endpoint fails closed with zero model calls", async () => {
-  const h = harness({ ai: null });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /final OCR/i);
-  assert.equal(s.draft, undefined);
-  assert.equal(h.stats().modelCalls, 0);
-});
 
-test("strict mode waits while AI reports processing, then proceeds when done", async () => {
-  const h = harness({ ai: (n) => (n <= 2 ? "processing" : "done") });
+test("strict mode reads only released Paperless text without AI or task credentials", async () => {
+  const h = harness();
   const s = await drive(h);
   assert.equal(s.status, "READY_FOR_REVIEW");
   assert.ok(s.draft);
   assert.equal(h.stats().modelCalls, 1);
-  assert.ok(h.stats().paperlessReads > 1, "expected bounded re-fetch retries");
-  const aiCall = h.calls.find((c) => c.host === "ai.test");
-  assert.ok(aiCall && aiCall.headers && aiCall.headers["x-api-key"] === "synthetic-ai", "Paperless-AI native auth must be x-api-key");
+  assert.ok(h.stats().paperlessReads >= 3);
+  assert.equal(h.stats().aiCalls, 0);
+  assert.ok(h.calls.filter(c => c.host === "paperless.test").every(c => c.pathname === "/api/documents/9501/"));
 });
 
-test("strict mode fails closed when OCR keeps changing", async () => {
-  const h = harness({ ai: "done", flipContent: (n, c) => c + "." });
+test("legacy AI configuration cannot introduce an AI dependency", async () => {
+  const h = harness({ ai: "processing" });
   const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /final OCR|stable/i);
-  assert.equal(h.stats().modelCalls, 0);
+  assert.equal(s.status, "READY_FOR_REVIEW");
+  assert.equal(h.stats().aiCalls, 0);
+  assert.equal(h.stats().modelCalls, 1);
 });
 
-test("off mode preserves existing behavior (regression guard)", async () => {
-  const h = harness({ ai: "done" });
+for (const [name, alterDoc] of [
+  ["removed destination tag", (n,d) => n === 2 ? {...d,tags:[]} : d],
+  ["protected tag added", (n,d) => n === 2 ? {...d,tags:[77,5]} : d],
+  ["missing OCR", (n,d) => ({...d,content:""})],
+  ["missing versions", (n,d) => ({...d,versions:[]})],
+  ["wrong document ID", (n,d) => n === 2 ? {...d,id:9999} : d],
+]) {
+  test(name + " fails closed without model calls", async () => {
+    const h = harness({alterDoc});
+    const s = await drive(h);
+    assert.equal(s.status, "REVIEW_REQUIRED");
+    assert.equal(h.stats().modelCalls, 0);
+  });
+}
+for (const [name, alterDoc] of [
+  ["OCR", (n,d) => n === 2 ? {...d,content:d.content+" FEE 1.00"} : d],
+  ["timestamp", (n,d) => n === 2 ? {...d,modified:"2026-11-21T00:00:00Z"} : d],
+  ["file version", (n,d) => n === 2 ? {...d,versions:[{added:"2026-11-21T00:00:00Z"}]} : d],
+]) {
+  test(name + " change during release holds without extraction", async () => {
+    const h = harness({alterDoc});
+    const s = await drive(h);
+    assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
+    assert.equal(h.stats().modelCalls, 0);
+  });
+}
+test("off mode retains legacy synthetic compatibility", async () => {
+  const h = harness();
   delete h.config.finalizationMode;
   const s = await drive(h);
   assert.equal(s.status, "READY_FOR_REVIEW");
-  assert.equal(h.stats().modelCalls, 1);
   assert.equal(h.stats().aiCalls, 0);
 });
-
-test("protected tags are denied before any finalization check", async () => {
-  const h = harness({ tags: [77, 5], ai: "done" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /excluded sensitive tag/);
-  assert.equal(h.stats().modelCalls, 0);
-  assert.equal(h.stats().aiCalls, 0);
-});
-
-test("strict mode holds a source that changes after the initial release observation", async () => {
-  const h = harness({ ai: "done", flipContent: (n, c) => (n === 2 ? c + "\nFEE 1.00" : c) });
-  const s = await drive(h);
-  assert.equal(s.status, "RELEASE_UNPROVEN_REVIEW");
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("Paperless-AI history bound to another document fails closed", async () => {
-  const h = harness({ ai: "wrongdoc" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /final OCR/i);
-  assert.equal(s.draft, undefined);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("invalid finalization numerics fail fast at startup", async () => {
-  const bad = [
-    { finalizationMode: "strict", finalizationStableReads: 1 },
-    { finalizationMode: "strict", finalizationMaxAttempts: NaN },
-    { finalizationMode: "bogus" }
-  ];
-  for (const extra of bad) {
-    const h = harness({ ai: "done" });
-    assert.throws(
-      () => createAtlasBridge({ ...h.config, ...extra }, { fetcher: h.fetcher, dataDir: mkdtempSync(join(tmpdir(), "w21-bad-")) }),
-      /Unknown finalizationMode|Invalid finalization/
-    );
+test("invalid finalization numerics fail fast", async () => {
+  const h = harness();
+  for (const extra of [{finalizationStableReads:1},{finalizationMaxAttempts:NaN},{finalizationMode:"bogus"}]) {
+    assert.throws(() => createAtlasBridge({...h.config,...extra},{fetcher:h.fetcher,dataDir:mkdtempSync(join(tmpdir(),"w21-bad-"))}),/Unknown finalizationMode|Invalid finalization/);
   }
+  const src = {id:9501,modified:"2026-11-20T22:00:00Z",content:ocr,contentHash:createHash("sha256").update(ocr).digest("hex"),versions:[{added:"2026-11-20T22:00:00Z"}]};
+  await assert.rejects(verifyFinalOcr(h.fetcher,{...h.config,finalizationMaxAttempts:0},src),/finalizationMaxAttempts/);
 });
-
-test("verifyFinalOcr requires AI evidence even when text is stable", async () => {
-  const h = harness({ ai: null });
-  const src = { id: 9501, modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
-  const r = await verifyFinalOcr(h.fetcher, h.config, src, { sleep: async () => {} });
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /final OCR/i);
-});
-
-test("string document ID still sees AI processing (type-safe doc match)", async () => {
-  const h = harness({ ai: "processing" });
-  const src = { id: "9501", modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
-  const r = await verifyFinalOcr(h.fetcher, h.config, src, { sleep: async () => {} });
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /processing/);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("verifyFinalOcr rejects unusable numerics fail-fast instead of crashing", async () => {
-  const h = harness({ ai: "done" });
-  const src = { id: 9501, modified: "2026-11-20T22:00:00Z", content: ocr, contentHash: "x" };
-  await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationMaxAttempts: 0 }, src, { sleep: async () => {} }), /finalizationMaxAttempts/);
-  await assert.rejects(verifyFinalOcr(h.fetcher, { ...h.config, finalizationStableReads: 1 }, src, { sleep: async () => {} }), /finalizationStableReads/);
-});
-
-test("OCR still running fails closed with zero model calls", async () => {
-  const h = harness({ ai: "ocr-pending" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /OCR|final OCR/i);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("missing Paperless-AI history fails closed", async () => {
-  const h = harness({ ai: "no-history" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /final OCR|history/i);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("reverted AI record fails closed", async () => {
-  const h = harness({ ai: "reverted" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /revert|final OCR/i);
-  assert.equal(h.stats().modelCalls, 0);
-});
-
-test("OCR done but not written back fails closed", async () => {
-  const h = harness({ ai: "not-written" });
-  const s = await drive(h);
-  assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason, /write|final OCR/i);
-  assert.equal(h.stats().modelCalls, 0);
+test("insufficient reads cannot satisfy revision proof", async () => {
+  const h = harness();
+  h.config.finalizationMaxAttempts=1;
+  const s=await drive(h);
+  assert.equal(s.status,"REVIEW_REQUIRED");
+  assert.equal(h.stats().modelCalls,0);
 });

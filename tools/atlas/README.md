@@ -54,28 +54,7 @@ medical/sensitive tags, without latest OCR content, or with oversized text.
 It computes a SHA-256 OCR revision hash, so a change after import is held for
 human review rather than creating a second Receipts record.
 
-When a separately authorized release tag is configured, first extraction of a
-revision additionally requires NATIVE current-version release binding: the
-bridge re-reads the document's native tag history and version records and
-requires a 21-add strictly after the current-version floor (newest file
-version, plus any audited content/checksum/versions change) by an authorized
-actor, with no 21 removal at/after the authorizing add (see `evaluateReleaseBinding`).
-The installed history endpoint returns a complete newest-first bare array;
-that verified shape is the only accepted one — any paginated/envelope wrapper
-or oversized set is denied outright rather than trusted piecemeal, and no next
-link is ever followed. Tag21 presence alone never authorizes extraction.
-history, version, actor, or OCR evidence that is missing or uninterpretable
-fails closed as RELEASE_UNPROVEN_REVIEW with zero model calls. No
-caller-supplied release claim is accepted (rejected at the webhook).
-With no authorized releasers configured (R20 HOLD posture) the path denies
-everything. Import re-verifies the same binding on the current revision.
-
-A **Document Updated** event may occur before Paperless-AI has finished its
-improved OCR. A missing/unfinished OCR response is recorded as needing review,
-not silently imported. Re-send the same document ID after OCR completion;
-the integration must never assume that a tag assignment proves the text is
-final. Paperless currently does not guarantee a deletion webhook, so future
-orphan reconciliation needs a separate bounded read-only check.
+The authorized Tracer destination tag alone signals release after upstream OCR is complete and reviewed. Native Paperless permission workflows grant and revoke source access for the bridge account. The bridge re-reads only that document's stored text, hash, tags and versions; in strict mode consecutive reads must match. If the source changes, becomes unavailable or loses its destination tag, extraction or import is held for review. No direct Paperless-AI, task-list or owner-only history API access is required. The upstream authorized releaser—not Tracer—establishes OCR completion; a stable text snapshot does not independently prove it. Paperless originals remain in Paperless.
 
 ## Structured extraction and arithmetic
 
@@ -234,17 +213,7 @@ Oathgate's configured route is authorized and appropriate for that document.
 Set ATLAS_AUTO_IMPORT_ENABLED=1 only after validated source-specific acceptance.
 Both default OFF. Keep medical and other protected tags excluded.
 
-ATLAS_FINALIZATION_MODE=strict additionally requires doc-ID-bound proof that
-final improved OCR completed (settled Paperless tasks, stable revision across
-bounded re-fetches, plus a Paperless-AI OCR record done+written-back+never-reverted
-and a non-reverted history item bound to the document) before
-any model call. Anything unproven fails closed to manual review with zero model
-calls. An Updated event alone is never proof. Keep the default OFF until the
-Paperless-AI endpoint, its token, the live tag IDs, and the
-protected-exclusion list are qualified and separately approved. Response shapes
-verified read-only 2026-11-21 against the installed native contract; confirm the
-three REST path strings in receipt-bridge-core.mjs read-only before activation
-(a wrong path fails closed, never open).
+ATLAS_FINALIZATION_MODE=strict requires a stable released Paperless document across bounded consecutive reads (OCR hash, modification timestamp and native versions). The destination tag must be assigned by an authorized releaser after OCR completion. Missing, changed or revoked source evidence fails closed before any model call. No direct Paperless-AI URL/token or task permissions are required. Keep the default OFF until the live tag IDs and protected exclusions are qualified and approved; production must use strict mode.
 
 Classification reuses existing live Paperless tags (verified 2026-11-21):
 Tracer=14 is the required receipt tag; Grocy=15 adds the `grocy` route and
@@ -268,10 +237,7 @@ separately built, tested and pinned fork image is deployed.
   reviewer draft revisions reject stale approvals, concurrent approvals cannot
   duplicate, OCR changes preserve reviewer corrections until re-review, and
   confirm-match stores a durable bridge-side payment association with zero
-  Firefly writes. Plus: strict finalization gate (an Updated event is a signal,
-  not proof; doc-ID-bound settled-tasks + stable-revision + Paperless-AI-done
-  evidence required before any model call, fail-closed to manual review with
-  zero model calls when unproven). Plus: OCR/model unit spellings normalize to the canonical
+  Firefly writes. Plus: strict release-revision gate (upstream authorized destination tag and bounded stable Paperless reads before any model call; fail closed on missing, changed or revoked evidence). Plus: OCR/model unit spellings normalize to the canonical
   catalog (each/count/mass/volume), unknown units block import for review, and
   the import payload carries unitOfMeasure plus sourcePaperlessDocumentId.
 - **NOT VERIFIED:** real Paperless webhook delivery to this bridge,

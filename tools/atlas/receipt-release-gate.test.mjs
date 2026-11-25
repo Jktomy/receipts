@@ -273,8 +273,8 @@ test("protected source with release tag is still denied before any model call", 
   assert.equal(h.stats().destCalls, 0);
 });
 
-test("OCR pending (AI processing) with release tag is held, zero model calls", async () => {
-  const h = harness({ ai: "processing", auth: [2] });
+test("Missing Paperless OCR with release tag is held, zero model calls", async () => {
+  const h = harness({ auth: [2], contents: () => ({content:""}) });
   h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
   const { state } = await drive(h);
   assert.equal(state.status, "REVIEW_REQUIRED");
@@ -285,8 +285,8 @@ test("OCR that keeps changing with release tag is held, zero model calls", async
   const h = harness({ auth: [2], contents: (n) => ({ content: ocr + "\nTICK " + n }) });
   h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
   const { state } = await drive(h);
-  assert.equal(state.status, "REVIEW_REQUIRED");
-  assert.match(state.reason ?? "", /final OCR|stable/i);
+  assert.equal(state.status, "RELEASE_UNPROVEN_REVIEW");
+  assert.match(state.reason ?? "", /revision changed/i);
   assert.equal(h.stats().modelCalls, 0);
   assert.equal(h.stats().destCalls, 0);
 });
@@ -505,14 +505,14 @@ test("release observation must survive mid-wait source changes (proven revision 
 });
 
 test("release evidence does not bypass the final-OCR gate", async () => {
-  const h = harness({ ai: "processing", auth: [2] });
+  const h = harness({ auth: [2], contents: () => ({content:""}) });
   h.setLive(undefined, undefined, { history: [tagAdd(ADD_AUTH)] });
   const dataDir = mkdtempSync(join(tmpdir(), "w25-evgate-"));
   const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
   await bridge.processDocument(9501);
   const s = bridge.state(9501);
   assert.equal(s.status, "REVIEW_REQUIRED");
-  assert.match(s.reason ?? "", /final OCR|processing/i);
+  assert.match(s.reason ?? "", /OCR content is not ready/i);
   assert.equal(h.stats().modelCalls, 0);
 });
 
