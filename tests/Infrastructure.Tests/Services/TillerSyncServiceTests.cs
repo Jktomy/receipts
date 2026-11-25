@@ -163,6 +163,21 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
+	public async Task FullReconciliation_MissingSourceIdHoldsWithoutChangingCache()
+	{
+		_rows.Add(Row("old", "2026-10-01", "STORE", -9.99m));
+		TillerSyncService service = CreateService();
+		await service.SyncFullAsync(CancellationToken.None);
+		_rows.Clear();
+		_rows.Add(Row("new", "2026-11-05", "STORE", -24.50m));
+
+		Func<Task> act = () => service.SyncFullAsync(CancellationToken.None);
+		await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*omitted 1 cached transaction IDs*");
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerTransactionEntity>().SingleAsync()).ProviderTransactionId.Should().Be("old");
+	}
+
+	[Fact]
 	public async Task CategoryEdit_RevisesInPlaceAndPreservesLinks()
 	{
 		// Arrange

@@ -187,6 +187,21 @@ public class TillerSyncService(
 					break;
 				}
 			}
+			// A complete source scan can prove absence, but not the reason for it.
+			// Hold rather than deleting a transaction or silently retaining it as current.
+			if (fromDate is null)
+			{
+				await using ApplicationDbContext context = contextFactory.CreateDbContext();
+				List<string> cachedIds = await context.Set<TillerTransactionEntity>()
+					.Where(e => e.SpreadsheetId == spreadsheetId && e.SupersededBy == null)
+					.Select(e => e.ProviderTransactionId).ToListAsync(cancellationToken);
+				int absent = cachedIds.Count(id => !sourceRows.ContainsKey(id));
+				if (absent > 0)
+				{
+					throw new InvalidOperationException($"Tiller full scan omitted {absent} cached transaction IDs; source changes require review before accepting a new snapshot.");
+				}
+			}
+
 			// Only accept rows after the complete paginated read passes its guards.
 			// No inferred merging or destructive handling of missing source IDs.
 			await SaveCheckpointAsync(spreadsheetId, maxDate, completed: false, cancellationToken);
