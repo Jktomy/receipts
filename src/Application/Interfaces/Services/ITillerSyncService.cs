@@ -13,5 +13,7 @@ public interface ITillerSyncService
 
 	Task<TillerSyncResult> SyncIncrementalAsync(CancellationToken cancellationToken);
 
+	Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total, IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken);
+
 	Task<TillerSyncStatus> GetSyncStatusAsync(CancellationToken cancellationToken);
 }
