@@ -751,3 +751,31 @@ test("enabled dispatch failure is recorded without touching the import", async (
     assert.ok(bridge.state(44).specialist?.error, "dispatch failure is recorded");
   }, { draft: fuelDraft, document: { tags: [77, 78] }, overrides: { myGarageTagId: 78, specialistDispatch: { enabled: true, mygarage: { baseUrl: "https://mygarage-unreachable.test", token: "t", vehicles: [{ vin: "VINAAA11111111111", label: "Camry" }] } } } });
 });
+
+test("numeric JSON monetary fields survive sanitization without rounding", () => {
+  const numeric = {...good, total:8.6, tax:0.61,
+    items:good.items.map(item=>({...item,quantity:Number(item.quantity),unitPrice:Number(item.unitPrice),total:Number(item.total)})),
+    adjustments:[{...good.adjustments[0],amount:-1}]};
+  const sanitized = sanitizePurchaseDraft(numeric);
+  assert.equal(sanitized.total,"8.6");
+  assert.equal(sanitized.tax,"0.61");
+  assert.equal(sanitized.items[0].unitPrice,"3.99");
+  assert.equal(sanitized.adjustments[0].amount,"-1");
+  assert.equal(qualifyItemization(sanitized,ocr).ok,true);
+  assert.equal(qualifyItemization(sanitizePurchaseDraft({...numeric,tax:0.611}),ocr).ok,false);
+  assert.equal(qualifyItemization(sanitizePurchaseDraft({...numeric,total:8.61}),ocr).ok,false);
+});
+test("literal receipt evidence preserves internal whitespace without fuzzy matching", () => {
+  const text = ocr.replace("MILK 1 3.99","MILK  1 3.99").replace("H-E-B 11/18/2026","H-E-B  11/18/2026");
+  const draft = {...good, merchantEvidence:"H-E-B  11/18/2026",items:[{...good.items[0],evidence:"MILK  1 3.99"},good.items[1]]};
+  assert.equal(qualifyItemization(sanitizePurchaseDraft(draft),text).ok,true);
+  assert.equal(qualifyItemization({...draft,items:[{...draft.items[0],evidence:"MILK 1 3.99"},draft.items[1]]},text).ok,false);
+  assert.equal(qualifyItemization({...draft,totalEvidence:"TAX 0.61\nTOTAL 8.60"},text).ok,false);
+  assert.equal(qualifyItemization({...draft,items:[{...draft.items[0],evidence:"imaginary product"},draft.items[1]]},text).ok,false);
+});
+test("printed total must match exact cents rather than a prefix of another amount", () => {
+  const text = ocr.replace("TOTAL 8.60","TOTAL 8.61");
+  assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.61"},text).ok,false);
+  assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.6"},text).ok,false);
+  assert.equal(qualifyItemization({...good,total:"8.6",totalEvidence:"8.60"},ocr).ok,true);
+});
