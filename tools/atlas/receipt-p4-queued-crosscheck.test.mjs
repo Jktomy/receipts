@@ -1,9 +1,4 @@
-// W20 C3 composition test — native AI queued-count cross-case (P4 guard port).
-// Shape: Paperless-AI status {queued:1, current:[]} with an otherwise fully
-// authorized v7 destination release (tags [14,21], authorized 14-add, settled OCR).
-// RED on v7 head: finalization wrongly READY + 1 model call (fail-open).
-// GREEN with the ported P4 guard: REVIEW_REQUIRED naming queued/AI, 0 model
-// calls, 0 destination calls. Synthetic only; no live access.
+// Regression: a released stable Paperless receipt must not consult global AI/task queues.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -27,13 +22,13 @@ const good = {
 const tagAdd = (ts, actorId = 2) => ({ action: "update", tagsOp: "add", tagsObjects: [TRACER], ts, actorId });
 
 function harness() {
-  let modelCalls = 0, destCalls = 0, paperlessPosts = 0;
+  let modelCalls = 0, destCalls = 0, paperlessPosts = 0, taskCalls = 0, aiCalls = 0;
   const fetcher = async (target, options = {}) => {
     const url = new URL(target);
     if (url.host === "paperless.test") {
       if ((options.method ?? "GET").toUpperCase() !== "GET") { paperlessPosts++; }
       if (url.pathname.startsWith("/api/tasks")) {
-        return new Response(JSON.stringify({ count: 0, next: null, previous: null, results: [] }), { status: 200 });
+        taskCalls++; throw new Error("Task endpoint must not be called");
       }
       if (/\/api\/documents\/\d+\/history\/?$/.test(url.pathname)) {
         return new Response(JSON.stringify([{ action: "update", tagsOp: "add", tagsObjects: [TRACER], ts: ADD_AUTH, actorId: 2 }]), { status: 200 });
@@ -45,19 +40,7 @@ function harness() {
       modelCalls++;
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(good) } }] }), { status: 200 });
     }
-    if (url.host === "ai.test") {
-      if (url.pathname === "/api/processing/status") {
-        // C3 shape: backend idle-current but ONE unattributed queued item.
-        return new Response(JSON.stringify(
-          { running: false, current: [], queuedDocumentIds: [], queued: 1 }), { status: 200 });
-      }
-      if (url.pathname.startsWith("/api/ocr/documents/")) {
-        return new Response(JSON.stringify({ ocr: { status: "done", writtenBack: true, revertedAt: null } }), { status: 200 });
-      }
-      if (url.pathname === "/api/history") {
-        return new Response(JSON.stringify({ items: [{ documentId: 9501, revertedAt: null }] }), { status: 200 });
-      }
-    }
+    if (url.host === "ai.test") { aiCalls++; throw new Error("AI endpoint must not be called"); }
     if (url.host === "receipts.test") {
       destCalls++;
       return new Response(JSON.stringify({ receipt: { id: "receipts-9501" } }), { status: 200 });
@@ -75,10 +58,10 @@ function harness() {
     paperlessAiUrl: "https://ai.test", paperlessAiToken: "synthetic-ai",
     authorizedReleaserIds: [2]
   };
-  return { fetcher, config, stats: () => ({ modelCalls, destCalls, paperlessPosts }) };
+  return { fetcher, config, stats: () => ({ modelCalls, destCalls, paperlessPosts, taskCalls, aiCalls }) };
 }
 
-test("C3 native queued:1 with empty current holds extraction with zero model calls", async () => {
+test("Released stable document needs neither global queue", async () => {
   const h = harness();
   const dataDir = mkdtempSync(join(tmpdir(), "w20-c3-"));
   const bridge = createAtlasBridge(h.config, { fetcher: h.fetcher, dataDir });
@@ -98,9 +81,10 @@ test("C3 native queued:1 with empty current holds extraction with zero model cal
       await new Promise((x) => setTimeout(x, 50));
     }
     assert.ok(s && s.status !== "QUEUED", "must settle out of QUEUED");
-    assert.notEqual(s.status, "READY_FOR_REVIEW", "unattributed queued work must not finalize");
-    assert.match(s.reason ?? "", /queued|Paperless-AI/i, "hold reason must name the queued AI leg");
-    assert.equal(h.stats().modelCalls, 0, "zero model calls while AI queue is unproven");
+    assert.equal(s.status, "READY_FOR_REVIEW");
+    assert.equal(h.stats().modelCalls, 1);
+    assert.equal(h.stats().taskCalls, 0);
+    assert.equal(h.stats().aiCalls, 0);
     assert.equal(h.stats().destCalls, 0, "zero destination calls");
     assert.equal(h.stats().paperlessPosts, 0, "no Paperless writes");
   } finally {
