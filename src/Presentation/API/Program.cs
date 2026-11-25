@@ -83,6 +83,7 @@ if (!isContractGeneration && !isChatGptCommand)
 	services.AddHostedService<CategoryAssistanceWorker>();
 	services.AddHostedService<ApprovedMappingBackgroundWorker>();
 	services.AddHostedService<OrganizationDiscoveryWorker>();
+	services.AddHostedService<TillerSyncWorker>();
 }
 
 // Build application
