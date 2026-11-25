@@ -15,6 +15,7 @@
  */
 import client from "@/lib/api-client";
 import type { Client } from "openapi-fetch";
+import { localErrorPolicy } from "@/lib/request-error-policy";
 import {
   type TillerAccount,
   type TillerAccountMapping,
@@ -28,6 +29,7 @@ import {
   type TillerSyncEventList,
   type TillerSyncResult,
   type TillerSyncStatus,
+  type TillerStoredTransaction,
   type TillerUpdateAccountMapping,
 } from "./tiller-contracts";
 
@@ -48,7 +50,20 @@ type BadRequest = { headers: Headers; content: ProblemJson };
 type ServiceUnavailable = { headers: Headers; content: ProblemJson };
 type NotFoundEmpty = { headers: Headers; content?: never };
 
+export interface TillerTransactionPage {
+  rows: TillerStoredTransaction[];
+  total: number;
+}
+
 interface TillerPaths {
+  "/api/tiller/transactions": {
+    get: {
+      parameters: {
+        query?: { offset?: number; limit?: number; sortBy?: string; sortDirection?: string; unlinkedOnly?: boolean };
+      };
+      responses: { 200: Ok<TillerTransactionPage>; 400: BadRequest };
+    };
+  };
   "/api/tiller/connection-status": {
     get: {
       parameters: NoParams;
@@ -317,4 +332,18 @@ export function getTillerPaymentContext(receiptId: string, signal?: AbortSignal)
       signal,
     })
     .then((r) => read("Tiller payment context", r, () => null));
+}
+
+/** Read a bounded page of the local cache; never fetch or write the provider. */
+export function listCachedTillerTransactions(
+  offset: number,
+  limit: number,
+  unlinkedOnly: boolean,
+  signal?: AbortSignal,
+) {
+  return tiller.GET("/api/tiller/transactions", {
+    params: { query: { offset, limit, sortBy: "date", sortDirection: "desc", unlinkedOnly } },
+    signal,
+    ...localErrorPolicy.request,
+  }).then((r) => read("Cached Tiller transactions", r));
 }

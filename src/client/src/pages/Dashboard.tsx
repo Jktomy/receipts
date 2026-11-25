@@ -9,6 +9,7 @@ import { PageHead, Icon } from "@/components/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DateRangeSelector } from "@/components/dashboard/DateRangeSelector";
 import { SummaryStats } from "@/components/dashboard/SummaryStats";
+import { TillerTransactionFeed } from "@/components/dashboard/TillerTransactionFeed";
 import { SpendingOverTimeWidget } from "@/components/dashboard/SpendingOverTimeWidget";
 import { SpendingByCategoryWidget } from "@/components/dashboard/SpendingByCategoryWidget";
 import { SpendingByAccountWidget } from "@/components/dashboard/SpendingByAccountWidget";
@@ -93,6 +94,16 @@ function Dashboard() {
         }
       />
 
+      <TillerTransactionFeed />
+
+      <div className="section-head">
+        <h3>Receipt reports</h3>
+        <div className="line" />
+      </div>
+      <p className="text-sm text-muted-foreground mb-3">
+        Selected date range. These reports describe captured receipts and locally recorded
+        payments, not all bank activity. Do not add these totals to the Tiller feed.
+      </p>
       <SummaryStats dateRange={dateRange} categoryView={categoryView} />
 
       <div
