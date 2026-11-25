@@ -137,6 +137,22 @@ test("model processing is explicit opt-in and rejects markdown wrappers", async 
   assert.equal(result.items.length,2);
   await assert.rejects(extractUsingOpenLyric(mock({draft:{...good}}).fetcher,{...config,openLyricUrl:"file:///etc"},ocr),/Invalid configured/);
 });
+test("extraction contract covers split OCR lines, single-item price and weighed produce", async () => {
+  const text = ["SYNTH MARKET", "11/18/2026", "1", "MILK", "3.99", "2", "PEARS", "1.25 LB @", "2.40", "3.00", "Subtotal", "6.99", "Tax", "0.51", "Total", "7.50", "ITEMS PURCHASED: 2"].join("\n");
+  const draft = {merchant:"SYNTH MARKET", merchantEvidence:"SYNTH MARKET", date:"2026-11-18", dateEvidence:"11/18/2026", currency:"USD", total:"7.50", totalEvidence:"7.50", tax:"0.51", confidence:"high", items:[
+    {description:"Milk", evidence:"MILK", quantity:"1", unitPrice:"3.99", total:"3.99"},
+    {description:"Pears", evidence:"PEARS", quantity:"1.25", unitPrice:"2.40", total:"3.00", unit:"lb"}
+  ], adjustments:[]};
+  const m=mock({draft});
+  const extracted=await extractUsingOpenLyric(m.fetcher,config,text);
+  const system=JSON.parse(m.calls[0].body).messages[0].content;
+  assert.match(system,/ONE OCR line/);
+  assert.match(system,/unitPrice equals the printed extended price/);
+  assert.match(system,/printed grand-total numeric amount itself/);
+  assert.equal(qualifyItemization(extracted,text).ok,true);
+  assert.equal(qualifyItemization({...draft,items:[{...draft.items[0],unitPrice:""},draft.items[1]]},text).ok,false);
+  assert.equal(qualifyItemization({...draft,totalEvidence:"Total\n7.50"},text).ok,false);
+});
 test("Firefly fetch retrieves every page read-only",async()=>{
   const p1={data:[fireflyOne],links:{next:"https://firefly.test/api/v1/transactions?page=2"}};
   const p2={data:[{...fireflyOne,id:"32"}],links:{next:null}};
