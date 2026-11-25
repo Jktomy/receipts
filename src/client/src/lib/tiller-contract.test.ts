@@ -79,7 +79,7 @@ describe("tiller wire contract", () => {
       ],
     };
     expect(
-      ["unknown", "linked", "manual", "ambiguous", "taken", "none"],
+      ["unknown", "linked", "manual", "ambiguous", "taken", "none", "possibletip"],
     ).toContain(suggestion.decision);
   });
 });

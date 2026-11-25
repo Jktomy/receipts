@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { RequestFailure } from "@/components/RequestFailure";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +91,37 @@ export function TillerMatchCard({
               Linked{suggestion.decision === "manual" ? " by hand" : ""}.
             </span>
             {unlink}
+          </div>
+        ) : suggestion.decision === "possibletip" &&
+          suggestion.receiptId &&
+          typeof suggestion.suggestedTip === "number" &&
+          Number.isFinite(suggestion.suggestedTip) &&
+          suggestion.suggestedTip > 0 ? (
+          <div className="space-y-2">
+            <p className="text-sm">
+              Possible tip: {new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+              }).format(suggestion.suggestedTip)}. Review the receipt and charge before linking.
+              This does not change the receipt amount.
+            </p>
+            <Link className="text-sm underline" to={`/receipts/${suggestion.receiptId}`}>
+              Review receipt
+            </Link>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                confirmMutation.mutate({
+                  providerTransactionId,
+                  receiptId: suggestion.receiptId!,
+                  reviewer: attribution,
+                })
+              }
+            >
+              {confirmMutation.isPending ? "Linking…" : "Confirm receipt link"}
+            </Button>
           </div>
         ) : suggestion.decision === "ambiguous" &&
           suggestion.candidates.length > 0 ? (

@@ -84,6 +84,22 @@ describe("TillerMatchCard", () => {
     );
   });
 
+  it("shows a possible tip without linking until explicitly confirmed", async () => {
+    mockSuggestion({ decision: "possibletip", receiptId: "receipt-1", confidence: null, candidates: [], suggestedTip: 2.25 });
+    const mutate = vi.fn();
+    vi.mocked(useConfirmTillerLink).mockReturnValue(mockMutationResult({ mutate, isPending: false }));
+    vi.mocked(useUnlinkTillerLink).mockReturnValue(mockMutationResult({}));
+    const user = userEvent.setup();
+    renderWithQueryClient(<TillerMatchCard providerTransactionId="txn-7" />);
+    expect(screen.getByText(/possible tip: \$2.25/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review receipt" })).toHaveAttribute("href", "/receipts/receipt-1");
+    expect(mutate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Confirm receipt link" }));
+    expect(mutate).toHaveBeenCalledWith({
+      providerTransactionId: "txn-7", receiptId: "receipt-1", reviewer: undefined,
+    });
+  });
+
   it("stays neutral when nothing is linked", () => {
     mockSuggestion({ decision: "none", receiptId: null, confidence: null, candidates: [] });
     vi.mocked(useConfirmTillerLink).mockReturnValue(mockMutationResult({}));

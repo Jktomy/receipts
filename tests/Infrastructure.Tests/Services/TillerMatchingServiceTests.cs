@@ -78,6 +78,47 @@ public class TillerMatchingServiceTests
 	}
 
 	[Fact]
+	public async Task Suggest_ExactFinalTotalIncludesTaxAndAdjustments()
+	{
+		Guid id = Guid.NewGuid();
+		_snapshots.Add(new TillerReceiptSnapshot(id, "Sample Store", new DateOnly(2026, 1, 1),
+			25m, true, TaxTotal: 2m, OtherAdjustmentTotal: -3m));
+		await AddTxnAsync("final-total", "2026-01-01", "SAMPLE STORE", -24m);
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("final-total", CancellationToken.None);
+		suggestion.Decision.Should().Be(TillerMatchDecision.Linked);
+		suggestion.ReceiptId.Should().Be(id);
+	}
+
+	[Fact]
+	public async Task Suggest_SubtotalAloneDoesNotMatchTaxedReceipt()
+	{
+		AddReceipt("Sample Store", new DateOnly(2026, 1, 1), 25m, tax: 2m);
+		await AddTxnAsync("subtotal", "2026-01-01", "SAMPLE STORE", -25m);
+		(await CreateService().SuggestAsync("subtotal", CancellationToken.None)).Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
+	public async Task Suggest_TruncatedProcessorMerchantOffersTipWithoutLink()
+	{
+		Guid id = AddReceipt("La'Moon Coffee and Tea", new DateOnly(2026, 1, 1), 20m, tax: 2m);
+		await AddTxnAsync("coffee", "2026-01-03", "TST*LAMOON COFFEE AND T, CITY, TX", -24m);
+		TillerMatchSuggestion suggestion = await CreateService().SuggestAsync("coffee", CancellationToken.None);
+		suggestion.Decision.Should().Be(TillerMatchDecision.PossibleTip);
+		suggestion.ReceiptId.Should().Be(id);
+		suggestion.SuggestedTip.Should().Be(2m);
+		await using ApplicationDbContext context = _factory.CreateDbContext();
+		(await context.Set<TillerReceiptLinkEntity>().CountAsync()).Should().Be(0);
+	}
+
+	[Fact]
+	public async Task Suggest_TruncatedMerchantDoesNotAutomaticallyLink()
+	{
+		AddReceipt("La'Moon Coffee and Tea", new DateOnly(2026, 1, 1), 20m, tax: 2m);
+		await AddTxnAsync("coffee", "2026-01-03", "TST*LAMOON COFFEE AND T, CITY, TX", -22m);
+		(await CreateService().SuggestAsync("coffee", CancellationToken.None)).Decision.Should().Be(TillerMatchDecision.None);
+	}
+
+	[Fact]
 	public async Task Suggest_AmountMismatch_YieldsNone()
 	{
 		// Arrange: a genuinely different amount (delta 5.01 over a 9.99 base
