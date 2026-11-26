@@ -16781,21 +16781,82 @@ components:
       description: "Why an item carries its envelope: its item type's default, the receipt's paid-from envelope, a per-item override, or the historical backfill. Only default-sourced (or unresolved) envelopes follow item-type changes."
 
     ExecutorSnapshotRequest:
+      required:
+      - spreadsheetId
+      - total
+      - rows
       type: object
-      required: [spreadsheetId, total, rows]
       properties:
         spreadsheetId:
           type: string
         total:
           pattern: ^-?(?:0|[1-9]\d*)$
           type:
-            - integer
-            - string
+          - integer
+          - string
           format: int32
         rows:
           type: array
           items:
             $ref: '#/components/schemas/ExecutorSnapshotRow'
+        metadata:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TillerExecutorMetadata'
+    TillerExecutorMetadata:
+      required:
+      - spreadsheet
+      - accounts
+      type: object
+      properties:
+        spreadsheet:
+          $ref: '#/components/schemas/TillerSpreadsheet'
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/TillerAccount'
+    TillerSpreadsheet:
+      required:
+      - spreadsheetId
+      - title
+      - editable
+      - backendAutoFill
+      - accountCount
+      type: object
+      properties:
+        spreadsheetId:
+          type: string
+        title:
+          type: string
+        editable:
+          type: boolean
+        backendAutoFill:
+          type: boolean
+        accountCount:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+          - integer
+          - string
+          format: int32
+    TillerAccount:
+      required:
+      - accountId
+      - displayName
+      - institution
+      - accountType
+      - class
+      type: object
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+        institution:
+          type: string
+        accountType:
+          type: string
+        class:
+          type: string
     ExecutorSnapshotRow:
       type: object
       required: [transactionId, date, description, amount, category, account, institution, status, splitGroupId]
@@ -17254,10 +17315,10 @@ components:
     # Tiller DTOs (mirrors generated API.json).
     TillerConnectionStatusDto:
       required:
-        - isConfigured
-        - isConnected
-        - selectedSpreadsheetId
-        - lastSuccessfulSyncUtc
+      - isConfigured
+      - isConnected
+      - selectedSpreadsheetId
+      - lastSuccessfulSyncUtc
       type: object
       properties:
         isConfigured:
@@ -17266,13 +17327,16 @@ components:
           type: boolean
         selectedSpreadsheetId:
           type:
-            - 'null'
-            - string
+          - 'null'
+          - string
         lastSuccessfulSyncUtc:
           type:
-            - 'null'
-            - string
+          - 'null'
+          - string
           format: date-time
+        executorManaged:
+          type: boolean
+          default: false
     TillerSyncStatusDto:
       required:
         - spreadsheetId

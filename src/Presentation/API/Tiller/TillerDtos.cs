@@ -23,7 +23,8 @@ public sealed record TillerConnectionStatusDto(
 	bool IsConfigured,
 	bool IsConnected,
 	string? SelectedSpreadsheetId,
-	DateTimeOffset? LastSuccessfulSyncUtc);
+	DateTimeOffset? LastSuccessfulSyncUtc,
+	bool ExecutorManaged = false);
 
 public sealed record TillerSelectedSpreadsheetDto(string? SelectedSpreadsheetId);
 

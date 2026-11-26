@@ -1,6 +1,7 @@
 using Application.Interfaces;
 using Application.Interfaces.Services;
 using Application.Models.Tiller;
+using Microsoft.Extensions.Configuration;
 namespace Application.Queries.Core.Tiller;
 
 public record GetTillerConnectionStatusQuery : IQuery<TillerConnectionStatus>;
@@ -8,12 +9,22 @@ public record GetTillerConnectionStatusQuery : IQuery<TillerConnectionStatus>;
 public class GetTillerConnectionStatusQueryHandler(
 	ITillerApiClient tillerApiClient,
 	ITillerSelectionService selectionService,
-	ITillerSyncService syncService) : Mediator.IRequestHandler<GetTillerConnectionStatusQuery, TillerConnectionStatus>
+	ITillerSyncService syncService,
+	IConfiguration? configuration = null) : Mediator.IRequestHandler<GetTillerConnectionStatusQuery, TillerConnectionStatus>
 {
 	public async ValueTask<TillerConnectionStatus> Handle(
 		GetTillerConnectionStatusQuery request,
 		CancellationToken cancellationToken)
 	{
+		if (!string.IsNullOrWhiteSpace(configuration?["TILLER_EXECUTOR_SPREADSHEET_ID"]))
+		{
+			string? selectedSheet = await selectionService.GetSelectedSpreadsheetIdAsync(cancellationToken);
+			TillerSyncStatus status = await syncService.GetSyncStatusAsync(cancellationToken);
+			// This is freshness of the last delivered snapshot, not a live OAuth probe.
+			bool fresh = status.Completed && status.LastSuccessfulSyncUtc is DateTimeOffset last
+				&& last >= DateTimeOffset.UtcNow.AddHours(-2);
+			return new TillerConnectionStatus(true, fresh, selectedSheet, status.LastSuccessfulSyncUtc, true);
+		}
 		if (!tillerApiClient.IsConfigured)
 		{
 			return new TillerConnectionStatus(false, false, null, null);
@@ -39,13 +50,21 @@ public class GetTillerConnectionStatusQueryHandler(
 public record GetTillerSpreadsheetsQuery : IQuery<IReadOnlyList<TillerSpreadsheet>>;
 
 public class GetTillerSpreadsheetsQueryHandler(
-	ITillerApiClient tillerApiClient) : Mediator.IRequestHandler<GetTillerSpreadsheetsQuery, IReadOnlyList<TillerSpreadsheet>>
+	ITillerApiClient tillerApiClient,
+	ITillerSelectionService selectionService,
+	IConfiguration? configuration = null) : Mediator.IRequestHandler<GetTillerSpreadsheetsQuery, IReadOnlyList<TillerSpreadsheet>>
 {
 	public async ValueTask<IReadOnlyList<TillerSpreadsheet>> Handle(
 		GetTillerSpreadsheetsQuery request,
 		CancellationToken cancellationToken)
 	{
-		return await tillerApiClient.ListSpreadsheetsAsync(cancellationToken);
+		if (tillerApiClient.IsConfigured && string.IsNullOrWhiteSpace(configuration?["TILLER_EXECUTOR_SPREADSHEET_ID"]))
+		{
+			return await tillerApiClient.ListSpreadsheetsAsync(cancellationToken);
+		}
+		TillerExecutorMetadata metadata = await selectionService.GetExecutorMetadataAsync(cancellationToken)
+			?? throw new InvalidOperationException("Waiting for the Executor account catalog.");
+		return [metadata.Spreadsheet];
 	}
 }
 
@@ -65,13 +84,21 @@ public class GetSelectedTillerSpreadsheetQueryHandler(
 public record GetTillerAccountsQuery : IQuery<IReadOnlyList<TillerAccount>>;
 
 public class GetTillerAccountsQueryHandler(
-	ITillerApiClient tillerApiClient) : Mediator.IRequestHandler<GetTillerAccountsQuery, IReadOnlyList<TillerAccount>>
+	ITillerApiClient tillerApiClient,
+	ITillerSelectionService selectionService,
+	IConfiguration? configuration = null) : Mediator.IRequestHandler<GetTillerAccountsQuery, IReadOnlyList<TillerAccount>>
 {
 	public async ValueTask<IReadOnlyList<TillerAccount>> Handle(
 		GetTillerAccountsQuery request,
 		CancellationToken cancellationToken)
 	{
-		return await tillerApiClient.ListAccountsAsync(cancellationToken);
+		if (tillerApiClient.IsConfigured && string.IsNullOrWhiteSpace(configuration?["TILLER_EXECUTOR_SPREADSHEET_ID"]))
+		{
+			return await tillerApiClient.ListAccountsAsync(cancellationToken);
+		}
+		TillerExecutorMetadata metadata = await selectionService.GetExecutorMetadataAsync(cancellationToken)
+			?? throw new InvalidOperationException("Waiting for the Executor account catalog.");
+		return metadata.Accounts;
 	}
 }
 

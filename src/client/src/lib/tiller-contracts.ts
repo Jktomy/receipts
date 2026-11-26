@@ -14,6 +14,7 @@ export interface TillerConnectionStatus {
   isConnected: boolean;
   selectedSpreadsheetId: string | null;
   lastSuccessfulSyncUtc: string | null;
+  executorManaged?: boolean;
 }
 
 export interface TillerSpreadsheet {

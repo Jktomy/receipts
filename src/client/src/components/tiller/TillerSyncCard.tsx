@@ -17,7 +17,7 @@ import {
   useTillerSyncStatus,
 } from "@/hooks/useTillerSync";
 
-export function TillerSyncCard() {
+export function TillerSyncCard({ executorManaged = false }: { executorManaged?: boolean } = {}) {
   const statusQuery = useTillerSyncStatus();
   const eventsQuery = useTillerSyncEvents(0, 10);
   const syncMutation = useSyncTiller();
@@ -72,7 +72,7 @@ export function TillerSyncCard() {
               : "never"}
           </span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        {executorManaged ? <p className="text-sm text-muted-foreground">Atlas refreshes this snapshot hourly.</p> : <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
@@ -89,7 +89,7 @@ export function TillerSyncCard() {
           >
             {syncMutation.isPending ? "Syncing…" : "Full re-sync"}
           </Button>
-        </div>
+        </div>}
         {eventsQuery.isError ? (
           <RequestFailure
             message="Sync history is unavailable."

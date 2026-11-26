@@ -21,6 +21,12 @@ public sealed record TillerAccount(
 	string AccountType,
 	string Class);
 
+// The Executor sends only the approved sheet and its linked account catalog.
+// Bank balances, credentials and unrelated sheets never enter this snapshot.
+public sealed record TillerExecutorMetadata(
+	TillerSpreadsheet Spreadsheet,
+	IReadOnlyList<TillerAccount> Accounts);
+
 public sealed record TillerCategory(
 	string Name,
 	string Group,

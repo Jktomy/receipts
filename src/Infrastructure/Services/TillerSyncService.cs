@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Interfaces.Services;
 using Application.Models.Tiller;
 using Infrastructure.Entities.Core;
@@ -51,8 +52,36 @@ public class TillerSyncService(
 
 	// Executor owns the renewable Tiller connection. Accept a full, validated
 	// snapshot from the authorized local caller, using the same identity guards.
-	public async Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total,
-		IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken)
+	public Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total,
+		IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken) =>
+		ImportExecutorSnapshotCoreAsync(spreadsheetId, total, rows, null, cancellationToken);
+
+	public Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total,
+		IReadOnlyList<TillerTransactionRow> rows, TillerExecutorMetadata metadata, CancellationToken cancellationToken)
+	{
+		ValidateMetadata(spreadsheetId, metadata);
+		return ImportExecutorSnapshotCoreAsync(spreadsheetId, total, rows, metadata, cancellationToken);
+	}
+
+	private static void ValidateMetadata(string spreadsheetId, TillerExecutorMetadata metadata)
+	{
+		if (metadata.Spreadsheet is null || metadata.Accounts is null
+			|| !string.Equals(metadata.Spreadsheet.SpreadsheetId, spreadsheetId, StringComparison.Ordinal)
+			|| !metadata.Spreadsheet.Editable || string.IsNullOrWhiteSpace(metadata.Spreadsheet.Title)
+			|| metadata.Spreadsheet.Title.Length > 500 || metadata.Accounts.Count > 1000
+			|| metadata.Spreadsheet.AccountCount != metadata.Accounts.Count
+			|| metadata.Accounts.Any(a => a is null || string.IsNullOrWhiteSpace(a.AccountId)
+				|| a.AccountId.Length > 200 || string.IsNullOrWhiteSpace(a.DisplayName)
+				|| a.DisplayName.Length > 500 || a.Institution is null || a.Institution.Length > 500
+				|| a.AccountType is null || a.AccountType.Length > 200 || a.Class is null || a.Class.Length > 200)
+			|| metadata.Accounts.Select(a => a.AccountId).Distinct(StringComparer.Ordinal).Count() != metadata.Accounts.Count)
+		{
+			throw new InvalidOperationException("Invalid or incomplete Executor account catalog.");
+		}
+	}
+
+	private async Task<TillerSyncResult> ImportExecutorSnapshotCoreAsync(string spreadsheetId, int total,
+		IReadOnlyList<TillerTransactionRow> rows, TillerExecutorMetadata? metadata, CancellationToken cancellationToken)
 	{
 		if (total < 0 || total != rows.Count || rows.Count > 50000 || rows.Any(r => r is null
 			|| string.IsNullOrWhiteSpace(r.TransactionId) || IsPlaceholderId(r.TransactionId)
@@ -74,20 +103,26 @@ public class TillerSyncService(
 				throw new InvalidOperationException("Executor snapshot differs from selected spreadsheet.");
 			}
 			TillerSyncResult result = await RunAsync(spreadsheetId, TillerSyncEventType.Full, null, cancellationToken, rows);
-			if (selected is null)
+			if (selected is null || metadata is not null)
 			{
 				await using ApplicationDbContext context = contextFactory.CreateDbContext();
 				TillerSelectedSpreadsheetEntity? current = await context.Set<TillerSelectedSpreadsheetEntity>().SingleOrDefaultAsync(cancellationToken);
 				if (current is null)
 				{
-					context.Set<TillerSelectedSpreadsheetEntity>().Add(new TillerSelectedSpreadsheetEntity
-					{ Id = Guid.NewGuid(), SpreadsheetId = spreadsheetId, UpdatedAt = DateTimeOffset.UtcNow });
-					await context.SaveChangesAsync(cancellationToken);
+					current = new TillerSelectedSpreadsheetEntity
+					{ Id = Guid.NewGuid(), SpreadsheetId = spreadsheetId, UpdatedAt = DateTimeOffset.UtcNow };
+					context.Set<TillerSelectedSpreadsheetEntity>().Add(current);
 				}
 				else if (!string.Equals(current.SpreadsheetId, spreadsheetId, StringComparison.Ordinal))
 				{
 					throw new InvalidOperationException("Spreadsheet selection changed during import.");
 				}
+				if (metadata is not null)
+				{
+					current.ExecutorMetadataJson = JsonSerializer.Serialize(metadata);
+					current.UpdatedAt = DateTimeOffset.UtcNow;
+				}
+				await context.SaveChangesAsync(cancellationToken);
 			}
 			return result;
 		}

@@ -2,6 +2,7 @@ using Application.Interfaces.Services;
 using Application.Models.Tiller;
 using Application.Queries.Core.Tiller;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Moq;
 
 namespace Application.Tests.Queries.Core.Tiller;
@@ -80,14 +81,40 @@ public class TillerQueryHandlerTests
 		// Arrange
 		List<TillerSpreadsheet> expected = [new("sheet-1", "Tiller Foundation", true, true, 1)];
 		Mock<ITillerApiClient> client = new();
+		client.SetupGet(c => c.IsConfigured).Returns(true);
 		client.Setup(c => c.ListSpreadsheetsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
-		GetTillerSpreadsheetsQueryHandler handler = new(client.Object);
+		Mock<ITillerSelectionService> selection = new(MockBehavior.Strict);
+		GetTillerSpreadsheetsQueryHandler handler = new(client.Object, selection.Object);
 
 		// Act
 		IReadOnlyList<TillerSpreadsheet> result = await handler.Handle(new GetTillerSpreadsheetsQuery(), CancellationToken.None);
 
 		// Assert
 		result.Should().BeSameAs(expected);
+		selection.VerifyNoOtherCalls();
+	}
+
+	[Fact]
+	public async Task ExecutorManagedMetadata_UsesOnlyApprovedCachedCatalog()
+	{
+		Mock<ITillerApiClient> client = new(MockBehavior.Strict);
+		client.SetupGet(c => c.IsConfigured).Returns(true);
+		Mock<ITillerSelectionService> selection = new(MockBehavior.Strict);
+		TillerExecutorMetadata metadata = new(new TillerSpreadsheet("sheet-1", "Treasury", true, true, 1),
+			[new TillerAccount("a-1", "Checking", "Bank", "checking", "asset")]);
+		selection.Setup(s => s.GetExecutorMetadataAsync(It.IsAny<CancellationToken>())).ReturnsAsync(metadata);
+		var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+			new Dictionary<string, string?> { ["TILLER_EXECUTOR_SPREADSHEET_ID"] = "sheet-1" }).Build();
+
+		var sheets = new GetTillerSpreadsheetsQueryHandler(client.Object, selection.Object, configuration);
+		var accounts = new GetTillerAccountsQueryHandler(client.Object, selection.Object, configuration);
+
+		(await sheets.Handle(new GetTillerSpreadsheetsQuery(), CancellationToken.None))
+			.Should().ContainSingle().Which.Should().Be(metadata.Spreadsheet);
+		(await accounts.Handle(new GetTillerAccountsQuery(), CancellationToken.None))
+			.Should().BeEquivalentTo(metadata.Accounts);
+		client.Verify(c => c.ListSpreadsheetsAsync(It.IsAny<CancellationToken>()), Times.Never);
+		client.Verify(c => c.ListAccountsAsync(It.IsAny<CancellationToken>()), Times.Never);
 	}
 
 	[Fact]

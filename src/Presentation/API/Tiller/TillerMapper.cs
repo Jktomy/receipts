@@ -10,7 +10,7 @@ using AppMapping = Application.Models.Tiller.TillerAccountMappingDto;
 public class TillerMapper
 {
 	public TillerConnectionStatusDto ToConnectionStatusDto(TillerConnectionStatus source) => new(
-		source.IsConfigured, source.IsConnected, source.SelectedSpreadsheetId, source.LastSuccessfulSyncUtc);
+		source.IsConfigured, source.IsConnected, source.SelectedSpreadsheetId, source.LastSuccessfulSyncUtc, source.ExecutorManaged);
 
 	public TillerSyncStatusDto ToSyncStatusDto(TillerSyncStatus source) => new(
 		source.SpreadsheetId, source.SyncedThroughDate, source.Completed, source.LastSuccessfulSyncUtc);

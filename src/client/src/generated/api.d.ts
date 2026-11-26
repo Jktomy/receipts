@@ -7714,6 +7714,26 @@ export interface components {
             /** Format: int32 */
             total: number | string;
             rows: components["schemas"]["ExecutorSnapshotRow"][];
+            metadata?: null | components["schemas"]["TillerExecutorMetadata"];
+        };
+        TillerExecutorMetadata: {
+            spreadsheet: components["schemas"]["TillerSpreadsheet"];
+            accounts: components["schemas"]["TillerAccount"][];
+        };
+        TillerSpreadsheet: {
+            spreadsheetId: string;
+            title: string;
+            editable: boolean;
+            backendAutoFill: boolean;
+            /** Format: int32 */
+            accountCount: number | string;
+        };
+        TillerAccount: {
+            accountId: string;
+            displayName: string;
+            institution: string;
+            accountType: string;
+            class: string;
         };
         ExecutorSnapshotRow: {
             transactionId: string;
@@ -7941,6 +7961,8 @@ export interface components {
             selectedSpreadsheetId: null | string;
             /** Format: date-time */
             lastSuccessfulSyncUtc: null | string;
+            /** @default false */
+            executorManaged: boolean;
         };
         TillerSyncStatusDto: {
             spreadsheetId: null | string;

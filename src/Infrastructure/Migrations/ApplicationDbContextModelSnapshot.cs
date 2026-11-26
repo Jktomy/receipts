@@ -2007,6 +2007,9 @@ namespace Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ExecutorMetadataJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("SpreadsheetId")
                         .IsRequired()
                         .HasMaxLength(200)

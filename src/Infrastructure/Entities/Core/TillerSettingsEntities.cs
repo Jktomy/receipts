@@ -7,6 +7,7 @@ public class TillerSelectedSpreadsheetEntity
 {
 	public Guid Id { get; set; }
 	public string SpreadsheetId { get; set; } = string.Empty;
+	public string? ExecutorMetadataJson { get; set; }
 	public DateTimeOffset UpdatedAt { get; set; }
 }
 

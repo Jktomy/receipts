@@ -53,13 +53,38 @@ public sealed class W20TillerMetadataHttpTests
 		mediator.VerifyNoOtherCalls();
 	}
 
-	private static async Task<WebApplication> Start(Mock<IMediator> mediator)
+	[Fact]
+	public async Task Executor_cache_routes_serve_linked_metadata_without_enabling_direct_sync()
+	{
+		var mediator = new Mock<IMediator>(MockBehavior.Strict);
+		mediator.Setup(x => x.Send(It.IsAny<GetTillerAccountsQuery>(), It.IsAny<CancellationToken>()))
+			.ReturnsAsync(new List<TillerAccount> { new("a-1", "Checking", "Bank", "checking", "asset") });
+		mediator.Setup(x => x.Send(It.IsAny<GetTillerSpreadsheetsQuery>(), It.IsAny<CancellationToken>()))
+			.ReturnsAsync(new List<TillerSpreadsheet> { new("sheet-1", "Treasury", true, true, 1) });
+		await using var app = await Start(mediator, true);
+		using var client = app.GetTestClient();
+		using HttpResponseMessage accounts = await client.GetAsync("/api/tiller/accounts");
+		accounts.StatusCode.Should().Be(HttpStatusCode.OK);
+		using JsonDocument body = JsonDocument.Parse(await accounts.Content.ReadAsStringAsync());
+		body.RootElement.GetArrayLength().Should().Be(1);
+		using HttpResponseMessage sheets = await client.GetAsync("/api/tiller/spreadsheets");
+		sheets.StatusCode.Should().Be(HttpStatusCode.OK);
+		using HttpResponseMessage sync = await client.PostAsync("/api/tiller/sync", new StringContent("{\"mode\":\"full\"}", System.Text.Encoding.UTF8, "application/json"));
+		sync.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+		mediator.Verify(x => x.Send(It.IsAny<GetTillerAccountsQuery>(), It.IsAny<CancellationToken>()), Times.Once);
+		mediator.Verify(x => x.Send(It.IsAny<GetTillerSpreadsheetsQuery>(), It.IsAny<CancellationToken>()), Times.Once);
+		mediator.VerifyNoOtherCalls();
+	}
+
+	private static async Task<WebApplication> Start(Mock<IMediator> mediator, bool executorManaged = false)
 	{
 		var builder = WebApplication.CreateBuilder();
 		builder.WebHost.UseTestServer();
 		builder.Logging.SetMinimumLevel(LogLevel.Warning);
 		builder.Configuration.Sources.Clear();
-		builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>());
+		builder.Configuration.AddInMemoryCollection(executorManaged
+			? new Dictionary<string, string?> { ["TILLER_EXECUTOR_SPREADSHEET_ID"] = "sheet-1" }
+			: new Dictionary<string, string?>());
 		builder.Services.AddApplicationServices(builder.Configuration).RegisterProgramServices();
 		builder.Services.RegisterInfrastructureServices(builder.Configuration);
 		builder.Services.AddAuthorization();

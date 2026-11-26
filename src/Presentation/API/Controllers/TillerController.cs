@@ -53,7 +53,7 @@ public class TillerController(
 	[EndpointSummary("List readable Tiller spreadsheets")]
 	[EndpointDescription("Returns the spreadsheets available through the connected read-only Tiller interface.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-	[RequireTillerConfigured]
+	[RequireTillerConfigured(allowExecutorCache: true)]
 	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<IReadOnlyList<TillerSpreadsheetDto>>, StatusCodeHttpResult>> GetSpreadsheets(
 		CancellationToken cancellationToken)
@@ -110,7 +110,7 @@ public class TillerController(
 	[EndpointSummary("List Tiller accounts")]
 	[EndpointDescription("Returns the financial accounts connected to Tiller. Read-only; no refresh is ever triggered.")]
 	[ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-	[RequireTillerConfigured]
+	[RequireTillerConfigured(allowExecutorCache: true)]
 	[RequireKeyScope(ApiKeyScopes.TillerRead)]
 	public async Task<Results<Ok<IReadOnlyList<TillerAccountDto>>, StatusCodeHttpResult>> GetAccounts(
 		CancellationToken cancellationToken)
@@ -205,7 +205,10 @@ public class TillerController(
 		{
 			var rows = request.Rows.Select(r => new TillerTransactionRow(r.TransactionId, r.Date, r.Description,
 				r.Amount, r.Category, r.Account, r.Institution, r.Status, r.SplitGroupId)).ToList();
-			return TypedResults.Ok(mapper.ToSyncResultDto(await sync.ImportExecutorSnapshotAsync(allowed, request.Total, rows, cancellationToken)));
+			TillerSyncResult result = request.Metadata is null
+				? await sync.ImportExecutorSnapshotAsync(allowed, request.Total, rows, cancellationToken)
+				: await sync.ImportExecutorSnapshotAsync(allowed, request.Total, rows, request.Metadata, cancellationToken);
+			return TypedResults.Ok(mapper.ToSyncResultDto(result));
 		}
 		catch (InvalidOperationException)
 		{
@@ -221,7 +224,8 @@ public class TillerController(
 	public sealed record ExecutorSnapshotRequest(
 		[property: System.Text.Json.Serialization.JsonRequired] string SpreadsheetId,
 		[property: System.Text.Json.Serialization.JsonRequired] int Total,
-		[property: System.Text.Json.Serialization.JsonRequired] List<ExecutorSnapshotRow> Rows);
+		[property: System.Text.Json.Serialization.JsonRequired] List<ExecutorSnapshotRow> Rows,
+		TillerExecutorMetadata? Metadata = null);
 
 	public sealed record ExecutorSnapshotRow(
 		[property: System.Text.Json.Serialization.JsonRequired] string TransactionId,

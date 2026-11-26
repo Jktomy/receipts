@@ -67,6 +67,14 @@ function mockStatus() {
 }
 
 describe("TillerSyncCard", () => {
+  it("uses the existing hourly sync instead of offering direct pull controls", () => {
+    mockStatus();
+    vi.mocked(useSyncTiller).mockReturnValue(mockMutationResult({}));
+    renderWithQueryClient(<TillerSyncCard executorManaged />);
+    expect(screen.getByText("Atlas refreshes this snapshot hourly.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sync new rows|full re-sync/i })).toBeNull();
+  });
+
   it("starts full and incremental syncs by mode", async () => {
     mockStatus();
     const mutate = vi.fn();

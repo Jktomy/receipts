@@ -69,7 +69,9 @@ export function TillerConnectionCard() {
       <CardContent className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={data.isConnected ? "secondary" : "destructive"}>
-            {data.isConnected ? "Connected" : "Connection failed"}
+            {data.executorManaged
+              ? (data.isConnected ? "Hourly sync current" : "Waiting for recent sync")
+              : (data.isConnected ? "Connected" : "Connection failed")}
           </Badge>
           {!data.isConnected && (
             <Button
@@ -82,6 +84,7 @@ export function TillerConnectionCard() {
             </Button>
           )}
         </div>
+        {data.executorManaged && <p className="text-sm text-muted-foreground">Managed by Atlas hourly read-only synchronization. Status reflects the last delivered snapshot.</p>}
         <p className="text-sm text-muted-foreground">
           Spreadsheet: {data.selectedSpreadsheetId ?? "none selected"} · Last
           sync: {formatSyncTime(data.lastSuccessfulSyncUtc)}

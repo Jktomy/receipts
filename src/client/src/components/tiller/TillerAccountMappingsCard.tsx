@@ -27,7 +27,7 @@ import {
 } from "@/hooks/useTillerAccountMappings";
 import { useSelectedTillerSpreadsheet } from "@/hooks/useTillerSpreadsheets";
 
-export function TillerAccountMappingsCard() {
+export function TillerAccountMappingsCard({ executorManaged = false }: { executorManaged?: boolean } = {}) {
   const mappingsQuery = useTillerAccountMappings();
   const tillerAccountsQuery = useTillerAccounts();
   const receiptsAccountsQuery = useAllAccounts();
@@ -90,6 +90,17 @@ export function TillerAccountMappingsCard() {
         <CardTitle>Tiller account mapping</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {executorManaged && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{tillerAccounts.length} linked Tiller accounts · Read-only</p>
+            <Table>
+              <TableHeader><TableRow><TableHead>Account</TableHead><TableHead>Institution</TableHead><TableHead>Type</TableHead></TableRow></TableHeader>
+              <TableBody>{tillerAccounts.map((account) => (
+                <TableRow key={account.accountId}><TableCell>{account.displayName}</TableCell><TableCell>{account.institution}</TableCell><TableCell>{account.accountType}</TableCell></TableRow>
+              ))}</TableBody>
+            </Table>
+          </div>
+        )}
         {mappings.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No accounts mapped yet. Mapping is optional and only affects

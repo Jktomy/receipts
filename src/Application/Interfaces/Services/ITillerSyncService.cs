@@ -15,5 +15,7 @@ public interface ITillerSyncService
 
 	Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total, IReadOnlyList<TillerTransactionRow> rows, CancellationToken cancellationToken);
 
+	Task<TillerSyncResult> ImportExecutorSnapshotAsync(string spreadsheetId, int total, IReadOnlyList<TillerTransactionRow> rows, TillerExecutorMetadata metadata, CancellationToken cancellationToken);
+
 	Task<TillerSyncStatus> GetSyncStatusAsync(CancellationToken cancellationToken);
 }
