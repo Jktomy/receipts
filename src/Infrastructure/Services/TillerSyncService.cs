@@ -119,6 +119,7 @@ public class TillerSyncService(
 				}
 				if (metadata is not null)
 				{
+					await SynchronizeNativeAccountsAsync(context, spreadsheetId, metadata.Accounts, cancellationToken);
 					current.ExecutorMetadataJson = JsonSerializer.Serialize(metadata);
 					current.UpdatedAt = DateTimeOffset.UtcNow;
 				}
@@ -129,6 +130,57 @@ public class TillerSyncService(
 		finally
 		{
 			SyncGate.Release();
+		}
+	}
+
+	// Reuse the existing spreadsheet-scoped mapping as the stable source identity.
+	// Never merge by display name, manufacture cards, delete an omitted account,
+	// or overwrite an explicitly managed local account.
+	private static async Task SynchronizeNativeAccountsAsync(ApplicationDbContext context,
+		string spreadsheetId, IReadOnlyList<TillerAccount> sourceAccounts, CancellationToken cancellationToken)
+	{
+		List<TillerAccountMappingEntity> mappings = await context.Set<TillerAccountMappingEntity>()
+			.Where(m => m.SpreadsheetId == spreadsheetId).ToListAsync(cancellationToken);
+		foreach (TillerAccount source in sourceAccounts)
+		{
+			List<TillerAccountMappingEntity> matching = mappings.Where(m =>
+				string.Equals(m.TillerAccountId, source.AccountId, StringComparison.Ordinal)).ToList();
+			if (matching.Count > 1)
+				throw new InvalidOperationException("Conflicting existing Tiller account mappings; review required.");
+			// A deterministic ID distinguishes accounts created by this sync from manual accounts.
+			byte[] identity = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+				JsonSerializer.Serialize(new[] { "tracer-tiller-native-account-v1", spreadsheetId, source.AccountId })));
+			Guid managedId = new(identity.AsSpan(0, 16));
+			TillerAccountMappingEntity? mapping = matching.SingleOrDefault();
+			if (mapping is not null && mapping.ReceiptsAccountId != managedId)
+				continue; // Preserve the existing explicit mapping and its local name.
+			AccountEntity? account = await context.Set<AccountEntity>().FindAsync(new object[] { managedId }, cancellationToken);
+			string display = source.DisplayName.Length > 200 ? source.DisplayName[..200] : source.DisplayName;
+			if (mapping is null)
+			{
+				if (account is not null || mappings.Any(m => m.ReceiptsAccountId == managedId))
+					throw new InvalidOperationException("Native account identity collision; review required.");
+				context.Set<AccountEntity>().Add(new AccountEntity { Id = managedId, Name = display, IsActive = true });
+				DateTimeOffset now = DateTimeOffset.UtcNow;
+				context.Set<TillerAccountMappingEntity>().Add(new TillerAccountMappingEntity
+				{
+					Id = Guid.NewGuid(), ReceiptsAccountId = managedId, TillerAccountId = source.AccountId,
+					TillerAccountName = display, SpreadsheetId = spreadsheetId, CreatedAt = now, UpdatedAt = now
+				});
+			}
+			else
+			{
+				if (account is null)
+					throw new InvalidOperationException("Mapped native account missing; review required.");
+				if (mappings.Any(m => m.Id != mapping.Id && m.ReceiptsAccountId == managedId))
+					throw new InvalidOperationException("Conflicting native account mappings; review required.");
+				account.Name = display;
+				if (!string.Equals(mapping.TillerAccountName, display, StringComparison.Ordinal))
+				{
+					mapping.TillerAccountName = display;
+					mapping.UpdatedAt = DateTimeOffset.UtcNow;
+				}
+			}
 		}
 	}
 
