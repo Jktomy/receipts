@@ -92,7 +92,7 @@ public class TillerSyncServiceTests
 	}
 
 	[Fact]
-	public async Task ExecutorSnapshot_CatalogUpdatesByStableIdWithoutCreatingManualAccounts()
+	public async Task ExecutorSnapshot_CatalogSynchronizesNativeAccountsByStableId()
 	{
 		TillerSyncService service = CreateService();
 		List<TillerTransactionRow> rows = [Row("first", "2026-10-01", "STORE", -9.99m)];
@@ -110,7 +110,13 @@ public class TillerSyncServiceTests
 		stored.Should().BeEquivalentTo(renamed);
 		(await CanonicalCountAsync()).Should().Be(1);
 		await using ApplicationDbContext context = _factory.CreateDbContext();
-		(await context.Set<AccountEntity>().CountAsync()).Should().Be(0);
+		List<AccountEntity> native = await context.Set<AccountEntity>().ToListAsync();
+		native.Should().HaveCount(2);
+		List<TillerAccountMappingEntity> mappings = await context.Set<TillerAccountMappingEntity>().ToListAsync();
+		mappings.Should().HaveCount(2);
+		mappings.Select(m => m.ReceiptsAccountId).Distinct().Should().HaveCount(2);
+		native.Single(a => a.Id == mappings.Single(m => m.TillerAccountId == "a1").ReceiptsAccountId).Name.Should().Be("Renamed");
+		native.Single(a => a.Id == mappings.Single(m => m.TillerAccountId == "a2").ReceiptsAccountId).Name.Should().Be("Checking");
 		_clientMock.VerifyNoOtherCalls();
 	}
 
