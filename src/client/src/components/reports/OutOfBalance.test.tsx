@@ -94,14 +94,16 @@ describe("OutOfBalance", () => {
       data: { totalCount: 0, totalDiscrepancy: 0, items: [] },
     });
     renderWithQueryClient(<OutOfBalance />);
-    expect(screen.getByText("All Balanced")).toBeInTheDocument();
-    expect(screen.getByText(/all receipts are balanced/i)).toBeInTheDocument();
+    expect(screen.getByText("No Payment Discrepancies")).toBeInTheDocument();
+    expect(
+      screen.getByText(/no linked-payment discrepancies/i),
+    ).toBeInTheDocument();
   });
 
   it("shows empty state when data is null", () => {
     setupMock({ data: undefined });
     renderWithQueryClient(<OutOfBalance />);
-    expect(screen.getByText("All Balanced")).toBeInTheDocument();
+    expect(screen.getByText("No Payment Discrepancies")).toBeInTheDocument();
   });
 
   it("renders summary header with count and discrepancy", () => {

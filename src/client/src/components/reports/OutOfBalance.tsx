@@ -174,9 +174,10 @@ export default function OutOfBalance() {
   if (!data || data.totalCount === 0) {
     return (
       <div className="rounded-lg border p-6 text-center">
-        <h2 className="card-title">All Balanced</h2>
+        <h2 className="card-title">No Payment Discrepancies</h2>
         <p className="mt-2 text-muted-foreground">
-          All receipts are balanced. No discrepancies found.
+          No linked-payment discrepancies found. Unlinked receipts are not
+          required to have a payment.
         </p>
       </div>
     );

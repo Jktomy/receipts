@@ -7497,8 +7497,8 @@ paths:
       description: >
         Returns headline counts for the data-quality reports so the reports hub can
         show at a glance whether anything needs attention: out-of-balance receipts,
-        duplicate receipt groups (matched on date + location), and uncategorized
-        receipt items. Backed by COUNT queries only â€” no report rows are returned.
+        duplicate receipt groups (matched on date + location + comparison total), and uncategorized
+        receipt items. No report rows are returned.
       security:
         - BearerAuth: []
         - ApiKey: []
@@ -7515,7 +7515,7 @@ paths:
       operationId: GetOutOfBalanceReport
       tags: [Reports]
       summary: Get out-of-balance receipts report
-      description: Returns all receipts where item subtotal + tax + adjustments does not equal the transaction total.
+      description: Returns receipts with at least one active payment where item subtotal + tax + adjustments does not equal the transaction total. Unlinked receipts are not discrepancies.
       security:
         - BearerAuth: []
         - ApiKey: []
@@ -7783,7 +7783,7 @@ paths:
           schema:
             type: string
             enum: [dateAndLocation, dateAndTotal, dateAndLocationAndTotal]
-            default: dateAndLocation
+            default: dateAndLocationAndTotal
           description: Which fields to compare when detecting duplicates.
         - name: locationTolerance
           in: query
@@ -13228,6 +13228,10 @@ components:
         transactionTotal:
           type: number
           format: double
+        comparisonTotal:
+          type: [number, "null"]
+          format: double
+          description: Linked payment total, otherwise qualified receipt total, or null when unavailable.
 
     AcceptedDuplicatesResponse:
       type: object

@@ -214,9 +214,7 @@ describe("DuplicateDetection", () => {
     setupMock();
     renderWithQueryClient(<DuplicateDetection />);
     expect(screen.getByText("2025-03-01 @ Store A")).toBeInTheDocument();
-    expect(
-      screen.getByText("2 receipts in this group"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("2 receipts in this group")).toBeInTheDocument();
   });
 
   it("renders receipt cards with location, date, and total", () => {
@@ -302,9 +300,9 @@ describe("DuplicateDetection", () => {
     const today = format(new Date(), "yyyy-MM-dd");
     expect(filename).toBe(`duplicate-detection_${today}.csv`);
     expect(csv).toBe(
-      "Match Key,Location,Date,Transaction Total,Receipt ID\r\n" +
-        "2025-03-01 @ Store A,Store A,2025-03-01,25.5,id-1\r\n" +
-        "2025-03-01 @ Store A,Store A,2025-03-01,30,id-2\r\n",
+      "Match Key,Location,Date,Comparison Total,Transaction Total,Receipt ID\r\n" +
+        "2025-03-01 @ Store A,Store A,2025-03-01,25.5,25.5,id-1\r\n" +
+        "2025-03-01 @ Store A,Store A,2025-03-01,30,30,id-2\r\n",
     );
   });
 
@@ -335,7 +333,7 @@ describe("DuplicateDetection", () => {
       } as any;
     });
     renderWithQueryClient(<DuplicateDetection />);
-    // Default is DateAndLocation, so Location Matching should be visible
+    // Exact default includes both location and total matching.
     expect(screen.getByText("Location Matching")).toBeInTheDocument();
   });
 
@@ -343,9 +341,10 @@ describe("DuplicateDetection", () => {
     setupMock({
       data: { groupCount: 0, totalDuplicateReceipts: 0, groups: [] },
     });
-    renderWithQueryClient(<DuplicateDetection />);
+    renderWithQueryClient(<DuplicateDetection />, {
+      route: "/?matchOn=dateAndLocation",
+    });
 
-    // Initially DateAndLocation mode, no Total Tolerance control
     expect(screen.queryByText("Total Tolerance")).not.toBeInTheDocument();
   });
 
@@ -366,7 +365,7 @@ describe("DuplicateDetection", () => {
       renderWithQueryClient(<DuplicateDetection />);
 
       expect(mockHook).toHaveBeenLastCalledWith({
-        matchOn: "dateAndLocation",
+        matchOn: "dateAndLocationAndTotal",
         locationTolerance: "exact",
         totalTolerance: 0,
         includeAccepted: undefined,
@@ -463,7 +462,9 @@ describe("DuplicateDetection", () => {
       });
       renderWithQueryClient(<DuplicateDetection />);
 
-      await user.click(screen.getByRole("button", { name: REPORT_AGAIN_GROUP_A }));
+      await user.click(
+        screen.getByRole("button", { name: REPORT_AGAIN_GROUP_A }),
+      );
 
       expect(unacceptMutate).toHaveBeenCalledWith(["id-1", "id-2"]);
     });
@@ -550,7 +551,9 @@ describe("DuplicateDetection", () => {
       expect(
         screen.getByRole("button", { name: ACCEPT_GROUP_A }),
       ).toBeDisabled();
-      expect(screen.getByRole("button", { name: ACCEPT_GROUP_C })).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: ACCEPT_GROUP_C }),
+      ).toBeEnabled();
     });
   });
 
@@ -599,7 +602,9 @@ describe("DuplicateDetection", () => {
       });
       renderWithQueryClient(<DuplicateDetection />);
 
-      await user.click(acceptedSection().getByRole("button", { name: UNDO_ACCEPTED_GROUP_B }));
+      await user.click(
+        acceptedSection().getByRole("button", { name: UNDO_ACCEPTED_GROUP_B }),
+      );
 
       expect(unacceptMutate).toHaveBeenCalledWith(["id-3", "id-4"]);
     });
@@ -774,14 +779,13 @@ describe("DuplicateDetection", () => {
       data: { groupCount: 0, totalDuplicateReceipts: 0, groups: [] },
     });
     renderWithQueryClient(<DuplicateDetection />, {
-      route:
-        "/?matchOn=bogus&locationTolerance=bogus&totalTolerance=bogus",
+      route: "/?matchOn=bogus&locationTolerance=bogus&totalTolerance=bogus",
     });
 
     expect(screen.getByText("Match On")).toBeInTheDocument();
     expect(mockHook).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        matchOn: "dateAndLocation",
+        matchOn: "dateAndLocationAndTotal",
         locationTolerance: "exact",
         totalTolerance: 0,
       }),

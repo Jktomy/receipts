@@ -32,16 +32,16 @@ public static partial class DuplicateDetectionPolicy
 				.ToList(),
 
 			"dateandtotal" => ClusterByTotal(
-				receipts.OrderBy(r => r.Date).ThenBy(r => r.TransactionTotal).ThenBy(r => r.ReceiptId).GroupBy(r => r.Date),
+				receipts.Where(r => r.ComparisonTotal.HasValue).OrderBy(r => r.Date).ThenBy(r => r.ComparisonTotal).ThenBy(r => r.ReceiptId).GroupBy(r => r.Date),
 				TotalsMatch,
 				dateGroup => dateGroup.Key,
-				(date, seed) => $"{date:yyyy-MM-dd} — ${seed.TransactionTotal:F2}"),
+				(date, seed) => $"{date:yyyy-MM-dd} — ${seed.ComparisonTotal:F2}"),
 
 			_ => ClusterByTotal(
-				receipts.OrderBy(r => r.Date).ThenBy(r => r.TransactionTotal).ThenBy(r => r.ReceiptId).GroupBy(r => (r.Date, Location: normalized ? NormalizeLocation(r.Location) : r.Location)),
+				receipts.Where(r => r.ComparisonTotal.HasValue).OrderBy(r => r.Date).ThenBy(r => r.ComparisonTotal).ThenBy(r => r.ReceiptId).GroupBy(r => (r.Date, Location: normalized ? NormalizeLocation(r.Location) : r.Location)),
 				TotalsMatch,
 				locDateGroup => locDateGroup.Key,
-				(key, seed) => $"{key.Date:yyyy-MM-dd} @ {seed.Location} — ${seed.TransactionTotal:F2}")
+				(key, seed) => $"{key.Date:yyyy-MM-dd} @ {seed.Location} — ${seed.ComparisonTotal:F2}")
 		};
 
 	}
@@ -62,7 +62,7 @@ public static partial class DuplicateDetectionPolicy
 			{
 				int start = index++;
 				DuplicateReceiptSummary seed = ordered[start];
-				while (index < ordered.Count && totalsMatch(seed.TransactionTotal, ordered[index].TransactionTotal))
+				while (index < ordered.Count && totalsMatch(seed.ComparisonTotal!.Value, ordered[index].ComparisonTotal!.Value))
 				{
 					index++;
 				}

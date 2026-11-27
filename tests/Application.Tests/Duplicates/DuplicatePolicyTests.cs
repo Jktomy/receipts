@@ -22,6 +22,21 @@ public class DuplicatePolicyTests
 		}
 	}
 
+	[Theory]
+	[InlineData("dateAndTotal")]
+	[InlineData("dateAndLocationAndTotal")]
+	public void UnlinkedReceipts_CompareQualifiedReceiptTotalsAndSkipUnknownAmounts(string mode)
+	{
+		DateOnly date = new(2025, 1, 1);
+		var first = new DuplicateReceiptSummary(Guid.NewGuid(), "Store", date, 0m) { ComparisonTotal = 15.98m };
+		var second = new DuplicateReceiptSummary(Guid.NewGuid(), "Store", date, 0m) { ComparisonTotal = 39.81m };
+		var unknown = new DuplicateReceiptSummary(Guid.NewGuid(), "Store", date, 0m) { ComparisonTotal = null };
+		DuplicateDetectionPolicy.Group([first, second, unknown], mode, "exact", 0m).Should().BeEmpty();
+		var replay = first with { ReceiptId = Guid.NewGuid() };
+		DuplicateDetectionPolicy.Group([first, second, unknown, replay], mode, "exact", 0m)
+			.Should().ContainSingle().Which.Receipts.Select(r => r.ReceiptId).Should().BeEquivalentTo([first.ReceiptId, replay.ReceiptId]);
+	}
+
 	[Fact]
 	public void LocationNormalization_IsAnExplicitMode()
 	{

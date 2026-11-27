@@ -19,7 +19,7 @@ public class ReportService(IDbContextFactory<ApplicationDbContext> contextFactor
 		await using ApplicationDbContext context = await contextFactory.CreateDbContextAsync(cancellationToken);
 
 		// Build the base query: JOIN receipts with aggregated items, transactions, and adjustments.
-		// Use LEFT JOINs so receipts with no items/transactions/adjustments still appear if out of balance.
+		// Payment matching is optional. Only receipts with at least one active payment can be discrepant.
 		var baseQuery = from r in context.Receipts.AsNoTracking()
 						where r.DeletedAt == null
 						let itemSubtotal = context.ReceiptItems
@@ -33,7 +33,8 @@ public class ReportService(IDbContextFactory<ApplicationDbContext> contextFactor
 							.Sum(t => (decimal?)t.Amount) ?? 0m
 						let expectedTotal = itemSubtotal + r.TaxAmount + adjustmentTotal
 						let difference = expectedTotal - transactionTotal
-						where difference != 0m
+						where context.Transactions.Any(t => t.ReceiptId == r.Id && t.DeletedAt == null)
+						&& difference != 0m
 						select new
 						{
 							r.Id,
@@ -805,7 +806,8 @@ public class ReportService(IDbContextFactory<ApplicationDbContext> contextFactor
 									   let transactionTotal = context.Transactions
 										   .Where(t => t.ReceiptId == r.Id && t.DeletedAt == null)
 										   .Sum(t => (decimal?)t.Amount) ?? 0m
-									   where itemSubtotal + r.TaxAmount + adjustmentTotal != transactionTotal
+									   where context.Transactions.Any(t => t.ReceiptId == r.Id && t.DeletedAt == null)
+									   && itemSubtotal + r.TaxAmount + adjustmentTotal != transactionTotal
 									   select r.Id)
 			.CountAsync(cancellationToken);
 

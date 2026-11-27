@@ -16,6 +16,8 @@ public partial class ApplicationDbContext
 			if (entry.State == EntityState.Modified &&
 				(entry.Property(receipt => receipt.Date).IsModified
 				|| entry.Property(receipt => receipt.Location).IsModified
+				|| entry.Property(receipt => receipt.TaxAmount).IsModified
+				|| entry.Property(receipt => receipt.TaxUnknown).IsModified
 				|| entry.Property(receipt => receipt.DeletedAt).IsModified))
 			{
 				receiptIds.Add(entry.Entity.Id);
@@ -37,17 +39,51 @@ public partial class ApplicationDbContext
 				}
 			}
 		}
+		CollectAmountParents<ReceiptItemEntity>(receiptIds, nameof(ReceiptItemEntity.TotalAmount));
+		CollectAmountParents<AdjustmentEntity>(receiptIds, nameof(AdjustmentEntity.Amount));
 		return [.. receiptIds.Order()];
 	}
 
-	private IQueryable<DuplicateReceiptFacts> QueryDuplicateFacts(Guid[] receiptIds)
-		=> Receipts.IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
-			.Where(receipt => receiptIds.Contains(receipt.Id))
-			.Select(receipt => new DuplicateReceiptFacts(receipt.Id, receipt.Date, receipt.Location,
-				Transactions.IgnoreQueryFilters().Where(payment => payment.ReceiptId == receipt.Id
-					&& (payment.DeletedAt == null
-						|| (receipt.DeletedAt != null && payment.CascadeDeletedByParentId == receipt.Id)))
-					.Sum(payment => (decimal?)payment.Amount) ?? 0m));
+	private void CollectAmountParents<TEntity>(HashSet<Guid> receiptIds, string amountProperty) where TEntity : class
+	{
+		foreach (EntityEntry<TEntity> entry in ChangeTracker.Entries<TEntity>())
+		{
+			if (entry.State is EntityState.Added or EntityState.Deleted ||
+				(entry.State == EntityState.Modified &&
+				(entry.Property(amountProperty).IsModified
+				|| entry.Property("ReceiptId").IsModified
+				|| entry.Property("DeletedAt").IsModified
+				|| entry.Property("CascadeDeletedByParentId").IsModified)))
+			{
+				var parent = entry.Property<Guid>("ReceiptId");
+				receiptIds.Add(parent.CurrentValue);
+				if (entry.State != EntityState.Added)
+				{
+					receiptIds.Add(parent.OriginalValue);
+				}
+			}
+		}
+	}
+
+	private IQueryable<DuplicateReceiptFacts> QueryDuplicateFacts(Guid[] receiptIds) =>
+		from receipt in Receipts.IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
+		where receiptIds.Contains(receipt.Id)
+		let paymentTotal = Transactions.IgnoreQueryFilters().Where(payment => payment.ReceiptId == receipt.Id
+			&& (payment.DeletedAt == null || (receipt.DeletedAt != null && payment.CascadeDeletedByParentId == receipt.Id)))
+			.Sum(payment => (decimal?)payment.Amount) ?? 0m
+		let hasPayment = Transactions.IgnoreQueryFilters().Any(payment => payment.ReceiptId == receipt.Id
+			&& (payment.DeletedAt == null || (receipt.DeletedAt != null && payment.CascadeDeletedByParentId == receipt.Id)))
+		let itemTotal = ReceiptItems.IgnoreQueryFilters().Where(item => item.ReceiptId == receipt.Id
+			&& (item.DeletedAt == null || (receipt.DeletedAt != null && item.CascadeDeletedByParentId == receipt.Id)))
+			.Sum(item => (decimal?)item.TotalAmount) ?? 0m
+		let hasItems = ReceiptItems.IgnoreQueryFilters().Any(item => item.ReceiptId == receipt.Id
+			&& (item.DeletedAt == null || (receipt.DeletedAt != null && item.CascadeDeletedByParentId == receipt.Id)))
+		let adjustmentTotal = Adjustments.IgnoreQueryFilters().Where(adjustment => adjustment.ReceiptId == receipt.Id
+			&& (adjustment.DeletedAt == null || (receipt.DeletedAt != null && adjustment.CascadeDeletedByParentId == receipt.Id)))
+			.Sum(adjustment => (decimal?)adjustment.Amount) ?? 0m
+		select new DuplicateReceiptFacts(receipt.Id, receipt.Date, receipt.Location, paymentTotal,
+			hasPayment ? paymentTotal :
+				(hasItems && !receipt.TaxUnknown ? itemTotal + receipt.TaxAmount + adjustmentTotal : (decimal?)null));
 
 	private List<DuplicateReceiptFacts> CaptureDuplicateFacts()
 	{
@@ -70,6 +106,8 @@ public partial class ApplicationDbContext
 				.ToDictionary(payment => payment.Id, payment => payment.ReceiptId);
 			EnsureDuplicatePaymentParentsUnchanged(expectedParents, storedParents);
 		}
+		EnsureDuplicateAmountParents<ReceiptItemEntity>();
+		EnsureDuplicateAmountParents<AdjustmentEntity>();
 		return QueryDuplicateFacts(ids).ToList();
 	}
 
@@ -94,7 +132,45 @@ public partial class ApplicationDbContext
 				.ToDictionaryAsync(payment => payment.Id, payment => payment.ReceiptId, cancellationToken).ConfigureAwait(false);
 			EnsureDuplicatePaymentParentsUnchanged(expectedParents, storedParents);
 		}
+		await EnsureDuplicateAmountParentsAsync<ReceiptItemEntity>(cancellationToken).ConfigureAwait(false);
+		await EnsureDuplicateAmountParentsAsync<AdjustmentEntity>(cancellationToken).ConfigureAwait(false);
 		return await QueryDuplicateFacts(ids).ToListAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private Dictionary<Guid, (Guid Original, Guid Current)> ExpectedDuplicateAmountParents<TEntity>() where TEntity : class =>
+		ChangeTracker.Entries<TEntity>()
+			.Where(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+			.ToDictionary(entry => entry.Property<Guid>("Id").CurrentValue,
+				entry => (entry.Property<Guid>("ReceiptId").OriginalValue, entry.Property<Guid>("ReceiptId").CurrentValue));
+
+	private void EnsureDuplicateAmountParents<TEntity>() where TEntity : class
+	{
+		var expected = ExpectedDuplicateAmountParents<TEntity>();
+		if (expected.Count == 0)
+		{
+			return;
+		}
+		Guid[] ids = [.. expected.Keys];
+		var stored = Set<TEntity>().IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
+			.Where(entity => ids.Contains(EF.Property<Guid>(entity, "Id")))
+			.Select(entity => new { Id = EF.Property<Guid>(entity, "Id"), Parent = EF.Property<Guid>(entity, "ReceiptId") })
+			.ToDictionary(entity => entity.Id, entity => entity.Parent);
+		EnsureDuplicatePaymentParentsUnchanged(expected, stored);
+	}
+
+	private async Task EnsureDuplicateAmountParentsAsync<TEntity>(CancellationToken cancellationToken) where TEntity : class
+	{
+		var expected = ExpectedDuplicateAmountParents<TEntity>();
+		if (expected.Count == 0)
+		{
+			return;
+		}
+		Guid[] ids = [.. expected.Keys];
+		var stored = await Set<TEntity>().IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
+			.Where(entity => ids.Contains(EF.Property<Guid>(entity, "Id")))
+			.Select(entity => new { Id = EF.Property<Guid>(entity, "Id"), Parent = EF.Property<Guid>(entity, "ReceiptId") })
+			.ToDictionaryAsync(entity => entity.Id, entity => entity.Parent, cancellationToken).ConfigureAwait(false);
+		EnsureDuplicatePaymentParentsUnchanged(expected, stored);
 	}
 
 	private Dictionary<Guid, (Guid Original, Guid Current)> ExpectedDuplicatePaymentParents()

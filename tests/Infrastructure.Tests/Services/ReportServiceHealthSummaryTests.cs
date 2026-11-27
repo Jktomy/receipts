@@ -19,6 +19,7 @@ public class ReportServiceHealthSummaryTests
 			foreach (Guid id in ids)
 			{
 				context.Receipts.Add(new ReceiptEntity { Id = id, Location = "Same Store", Date = new(2025, 3, 1) });
+				context.ReceiptItems.Add(new ReceiptItemEntity { Id = Guid.NewGuid(), ReceiptId = id, Description = "Item", Quantity = 1, UnitPrice = 10m, TotalAmount = 10m });
 			}
 
 			await context.SaveChangesAsync();
@@ -136,13 +137,17 @@ public class ReportServiceHealthSummaryTests
 			// Three receipts on the same date+location = ONE duplicate group.
 			for (int i = 0; i < 3; i++)
 			{
-				context.Receipts.Add(new ReceiptEntity { Id = Guid.NewGuid(), Location = "Store A", Date = date, TaxAmount = 0m });
+				Guid id = Guid.NewGuid();
+				context.Receipts.Add(new ReceiptEntity { Id = id, Location = "Store A", Date = date, TaxAmount = 0m });
+				context.ReceiptItems.Add(new ReceiptItemEntity { Id = Guid.NewGuid(), ReceiptId = id, Description = "Item", Quantity = 1, UnitPrice = 10m, TotalAmount = 10m });
 			}
 
 			// A second date+location pair with two receipts = a second group.
 			for (int i = 0; i < 2; i++)
 			{
-				context.Receipts.Add(new ReceiptEntity { Id = Guid.NewGuid(), Location = "Store B", Date = date, TaxAmount = 0m });
+				Guid id = Guid.NewGuid();
+				context.Receipts.Add(new ReceiptEntity { Id = id, Location = "Store B", Date = date, TaxAmount = 0m });
+				context.ReceiptItems.Add(new ReceiptItemEntity { Id = Guid.NewGuid(), ReceiptId = id, Description = "Item", Quantity = 1, UnitPrice = 10m, TotalAmount = 10m });
 			}
 
 			// A lone receipt is not a group.

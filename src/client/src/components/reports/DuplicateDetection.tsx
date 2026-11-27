@@ -57,6 +57,18 @@ interface DuplicateReceiptView {
   location: string;
   date: string;
   transactionTotal: number;
+  comparisonTotal?: number | null;
+}
+
+function comparedAmount(receipt: DuplicateReceiptView): number | null {
+  return receipt.comparisonTotal === undefined
+    ? (receipt.transactionTotal === 0 ? null : receipt.transactionTotal)
+    : receipt.comparisonTotal;
+}
+
+function comparedAmountLabel(receipt: DuplicateReceiptView): string {
+  const amount = comparedAmount(receipt);
+  return amount === null ? "Unknown total" : formatCurrency(amount);
 }
 
 /**
@@ -75,7 +87,10 @@ function groupKey(receiptIds: readonly string[] | undefined): string | null {
  * `pendingKey` when nothing is pending, `key` when a group somehow arrived with no receipts — and
  * null must never match null, or an identity-less group would sit permanently disabled at idle.
  */
-function isPendingGroup(pendingKey: string | null, key: string | null): boolean {
+function isPendingGroup(
+  pendingKey: string | null,
+  key: string | null,
+): boolean {
   return key !== null && pendingKey === key;
 }
 
@@ -113,7 +128,7 @@ function parseDuplicateDetectionParams(
     matchOn: parseEnumParam(
       searchParams.get("matchOn"),
       MATCH_ON_VALUES,
-      "dateAndLocation",
+      "dateAndLocationAndTotal",
     ),
     locationTolerance: parseEnumParam(
       searchParams.get("locationTolerance"),
@@ -158,12 +173,20 @@ export default function DuplicateDetection() {
   function handleExport() {
     exportCsv({
       filename: csvFilename("duplicate-detection"),
-      headers: ["Match Key", "Location", "Date", "Transaction Total", "Receipt ID"],
+      headers: [
+        "Match Key",
+        "Location",
+        "Date",
+        "Comparison Total",
+        "Transaction Total",
+        "Receipt ID",
+      ],
       rows: (data?.groups ?? []).flatMap((group) =>
         group.receipts.map((receipt) => [
           group.matchKey,
           receipt.location,
           receipt.date,
+          comparedAmount(receipt) ?? "",
           receipt.transactionTotal,
           receipt.receiptId,
         ]),
@@ -236,7 +259,10 @@ export default function DuplicateDetection() {
               value={locationTolerance}
               onValueChange={(v) => updateParams({ locationTolerance: v })}
             >
-              <SelectTrigger id="location-tolerance-select" className="w-[160px]">
+              <SelectTrigger
+                id="location-tolerance-select"
+                className="w-[160px]"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -303,12 +329,8 @@ export default function DuplicateDetection() {
               <p className="money-med">{data.groupCount}</p>
             </div>
             <div>
-              <p className="card-sub">
-                Total Duplicate Receipts
-              </p>
-              <p className="money-med">
-                {data.totalDuplicateReceipts}
-              </p>
+              <p className="card-sub">Total Duplicate Receipts</p>
+              <p className="money-med">{data.totalDuplicateReceipts}</p>
             </div>
             <Button
               variant="outline"
@@ -375,8 +397,7 @@ export default function DuplicateDetection() {
                           (o) => o.location !== receipt.location,
                         );
                         const totalDiffers = others.some(
-                          (o) =>
-                            o.transactionTotal !== receipt.transactionTotal,
+                          (o) => comparedAmount(o) !== comparedAmount(receipt),
                         );
 
                         return (
@@ -407,9 +428,7 @@ export default function DuplicateDetection() {
                                       : undefined
                                   }
                                 >
-                                  {formatCurrency(
-                                    Number(receipt.transactionTotal ?? 0),
-                                  )}
+                                  {comparedAmountLabel(receipt)}
                                 </p>
                               </div>
                               <div className="flex flex-col gap-1">
@@ -556,7 +575,7 @@ function AcceptedDuplicatesSection({
                     {group.receipts.map((receipt) => (
                       <li key={receipt.receiptId} className="truncate">
                         {formatDate(receipt.date)} — {receipt.location} —{" "}
-                        {formatCurrency(Number(receipt.transactionTotal ?? 0))}
+                        {comparedAmountLabel(receipt)}
                       </li>
                     ))}
                   </ul>
