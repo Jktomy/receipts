@@ -54,12 +54,12 @@ public class OutOfBalanceReportTests(PostgresFixture server) : IsolatedPostgresT
 		OutOfBalanceResult result = await service.GetOutOfBalanceAsync(
 			sortBy: "date", sortDirection: "asc", page: 1, pageSize: 50, CancellationToken.None);
 
-		// Assert — only the three out-of-balance receipts, ordered by date asc.
-		result.TotalCount.Should().Be(3);
-		result.Items.Select(i => i.ReceiptId).Should().Equal(r3, r1, r4);
+		// Assert — only the two receipts with active payments and discrepancies.
+		result.TotalCount.Should().Be(2);
+		result.Items.Select(i => i.ReceiptId).Should().Equal(r3, r1);
 
-		// TotalDiscrepancy = SUM(ABS(difference)) computed in SQL = |−70| + |15| + |20| = 105.
-		result.TotalDiscrepancy.Should().Be(105m);
+		// TotalDiscrepancy = SUM(ABS(difference)) computed in SQL = |−70| + |15| = 85.
+		result.TotalDiscrepancy.Should().Be(85m);
 
 		OutOfBalanceItem item1 = result.Items.Single(i => i.ReceiptId == r1);
 		item1.ItemSubtotal.Should().Be(100m);
@@ -70,7 +70,8 @@ public class OutOfBalanceReportTests(PostgresFixture server) : IsolatedPostgresT
 		item1.Difference.Should().Be(15m);
 
 		result.Items.Single(i => i.ReceiptId == r3).Difference.Should().Be(-70m);
-		result.Items.Single(i => i.ReceiptId == r4).Difference.Should().Be(20m);
+		result.Items.Should().NotContain(i => i.ReceiptId == r4);
+		(await service.GetHealthSummaryAsync(CancellationToken.None)).OutOfBalanceCount.Should().Be(2);
 	}
 
 	[Fact]
@@ -87,12 +88,15 @@ public class OutOfBalanceReportTests(PostgresFixture server) : IsolatedPostgresT
 		{
 			AddReceipt(seed, rSmall, new DateOnly(2025, 5, 1), tax: 0m);
 			AddItem(seed, rSmall, 10m);
+			AddTransaction(seed, rSmall, accountId, cardId, 0m);
 
 			AddReceipt(seed, rMedium, new DateOnly(2025, 5, 2), tax: 0m);
 			AddItem(seed, rMedium, 20m);
+			AddTransaction(seed, rMedium, accountId, cardId, 0m);
 
 			AddReceipt(seed, rLarge, new DateOnly(2025, 5, 3), tax: 0m);
 			AddItem(seed, rLarge, 30m);
+			AddTransaction(seed, rLarge, accountId, cardId, 0m);
 		});
 
 		ReportService service = new(new FixtureDbContextFactory(fixture));

@@ -130,7 +130,7 @@ public class ReportServiceHealthSummaryTests(PostgresFixture server) : IsolatedP
 	}
 
 	[Fact]
-	public async Task GetHealthSummaryAsync_TracksPairCompletenessWithoutLoadingReceiptTotals()
+	public async Task GetHealthSummaryAsync_TracksPairCompletenessForExactComparisonTotals()
 	{
 		Guid[] ids = [Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()];
 		await SeedAsync(Guid.NewGuid(), Guid.NewGuid(), context =>
@@ -138,6 +138,7 @@ public class ReportServiceHealthSummaryTests(PostgresFixture server) : IsolatedP
 			foreach (Guid id in ids)
 			{
 				AddReceipt(context, id, new(2025, 6, 1), "Same Store", 0m);
+				AddItem(context, id, 10m, "Food");
 			}
 		});
 		FixtureDbContextFactory factory = new(fixture);
@@ -186,13 +187,17 @@ public class ReportServiceHealthSummaryTests(PostgresFixture server) : IsolatedP
 			// Three receipts sharing date + location collapse into ONE duplicate group...
 			for (int i = 0; i < 3; i++)
 			{
-				AddReceipt(seed, Guid.NewGuid(), duplicateDate, "Duplicate Store", tax: 0m);
+				Guid id = Guid.NewGuid();
+				AddReceipt(seed, id, duplicateDate, "Duplicate Store", tax: 0m);
+				Classify(seed, AddItem(seed, id, 10m, "Food"), revisionId, categoryId);
 			}
 
 			// ...and two on a different date + location make a second.
 			for (int i = 0; i < 2; i++)
 			{
-				AddReceipt(seed, Guid.NewGuid(), otherDate, "Another Store", tax: 0m);
+				Guid id = Guid.NewGuid();
+				AddReceipt(seed, id, otherDate, "Another Store", tax: 0m);
+				Classify(seed, AddItem(seed, id, 10m, "Food"), revisionId, categoryId);
 			}
 
 			// A lone receipt on its own date + location is not a group. These duplicate receipts
@@ -213,6 +218,45 @@ public class ReportServiceHealthSummaryTests(PostgresFixture server) : IsolatedP
 		result.DuplicateGroupCount.Should().Be(2);
 
 		result.UncategorizedItemCount.Should().Be(2);
+	}
+
+	[Fact]
+	public async Task UnlinkedReceipts_UseQualifiedAmounts_NotZeroPayments_ForDuplicateReports()
+	{
+		Guid a = Guid.NewGuid(), b = Guid.NewGuid(), c = Guid.NewGuid(), d = Guid.NewGuid();
+		DateOnly date = new(2025, 5, 1);
+		await SeedAsync(Guid.NewGuid(), Guid.NewGuid(), seed =>
+		{
+			foreach (Guid id in new[] { a, b, c, d })
+			{
+				AddReceipt(seed, id, date, "Ride Store", 0m);
+			}
+			AddItem(seed, a, 15.98m, "Food");
+			AddItem(seed, b, 39.81m, "Food");
+			AddItem(seed, c, 15.98m, "Food");
+		});
+		var factory = new FixtureDbContextFactory(fixture);
+		var reader = new DuplicateReportReader(factory);
+		var report = new ReportService(factory);
+		DuplicateDetectionResult duplicates = await reader.GetDuplicatesAsync("dateAndLocationAndTotal", "exact", 0m, false, CancellationToken.None);
+		duplicates.Groups.Should().ContainSingle().Which.Receipts.Select(r => r.ReceiptId).Should().BeEquivalentTo([a, c]);
+		duplicates.Groups[0].Receipts.Should().OnlyContain(r => r.ComparisonTotal == 15.98m && r.TransactionTotal == 0m);
+		ReportsHealthSummaryResult summary = await report.GetHealthSummaryAsync(CancellationToken.None);
+		summary.DuplicateGroupCount.Should().Be(1);
+		summary.OutOfBalanceCount.Should().Be(0);
+		await new DuplicateWorkflowFixture(factory).AcceptDuplicateGroupAsync([a, c], CancellationToken.None);
+		(await report.GetHealthSummaryAsync(CancellationToken.None)).DuplicateGroupCount.Should().Be(0);
+		await using (ApplicationDbContext write = fixture.CreateDbContext())
+		{
+			var line = await write.ReceiptItems.SingleAsync(item => item.ReceiptId == a);
+			line.UnitPrice = 16m;
+			line.TotalAmount = 16m;
+			await write.SaveChangesAsync();
+		}
+		await using (ApplicationDbContext read = fixture.CreateDbContext())
+		{
+			(await read.AcceptedDuplicatePairs.CountAsync()).Should().Be(0);
+		}
 	}
 
 	[Fact]

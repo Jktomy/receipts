@@ -4,7 +4,11 @@ public record DuplicateReceiptSummary(
 	Guid ReceiptId,
 	string Location,
 	DateOnly Date,
-	decimal TransactionTotal);
+	decimal TransactionTotal)
+{
+	// Null means neither qualified receipt evidence nor a linked payment supplies a comparison total.
+	public decimal? ComparisonTotal { get; init; } = TransactionTotal;
+}
 
 /// <param name="MatchKey">
 /// Human-readable description of what these receipts have in common. This is a DISPLAY string —

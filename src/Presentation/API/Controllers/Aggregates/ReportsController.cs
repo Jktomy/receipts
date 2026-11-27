@@ -21,7 +21,7 @@ public class ReportsController(IMediator mediator, IEntityChangeNotifier notifie
 {
 	[HttpGet("health-summary")]
 	[EndpointSummary("Get data-quality health summary")]
-	[EndpointDescription("Returns headline counts for the data-quality reports so the reports hub can show at a glance whether anything needs attention: out-of-balance receipts, duplicate receipt groups (matched on date + location), and uncategorized receipt items. Backed by COUNT queries only — no report rows are returned.")]
+	[EndpointDescription("Returns headline counts for the data-quality reports so the reports hub can show at a glance whether anything needs attention: out-of-balance receipts, duplicate receipt groups (matched on date + location + comparison total), and uncategorized receipt items. No report rows are returned.")]
 	public async Task<Ok<ReportsHealthSummaryResponse>> GetHealthSummary(CancellationToken cancellationToken)
 	{
 		GetReportsHealthSummaryQuery query = new();
@@ -37,7 +37,7 @@ public class ReportsController(IMediator mediator, IEntityChangeNotifier notifie
 
 	[HttpGet("out-of-balance")]
 	[EndpointSummary("Get out-of-balance receipts report")]
-	[EndpointDescription("Returns all receipts where item subtotal + tax + adjustments does not equal the transaction total.")]
+	[EndpointDescription("Returns receipts with at least one active payment where item subtotal + tax + adjustments does not equal the transaction total. Unlinked receipts are not discrepancies.")]
 	public async Task<Results<Ok<OutOfBalanceResponse>, BadRequestProblem>> GetOutOfBalance(
 		[FromQuery] string? sortBy,
 		[FromQuery] string? sortDirection,
@@ -269,7 +269,7 @@ public class ReportsController(IMediator mediator, IEntityChangeNotifier notifie
 		[FromQuery] bool? includeAccepted,
 		CancellationToken cancellationToken)
 	{
-		string match = matchOn ?? "dateAndLocation";
+		string match = matchOn ?? "dateAndLocationAndTotal";
 		string locTol = locationTolerance ?? "exact";
 		decimal totTol = (decimal)(totalTolerance ?? 0);
 
@@ -377,7 +377,8 @@ public class ReportsController(IMediator mediator, IEntityChangeNotifier notifie
 			ReceiptId = summary.ReceiptId,
 			Location = summary.Location,
 			Date = summary.Date,
-			TransactionTotal = (double)summary.TransactionTotal
+			TransactionTotal = (double)summary.TransactionTotal,
+			ComparisonTotal = (double?)summary.ComparisonTotal
 		};
 
 	[HttpGet("category-trends")]

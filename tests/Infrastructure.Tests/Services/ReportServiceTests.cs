@@ -453,7 +453,7 @@ public class ReportServiceTests
 	}
 
 	[Fact]
-	public async Task GetOutOfBalanceAsync_HandlesReceiptWithNoTransactions()
+	public async Task GetOutOfBalanceAsync_ExcludesReceiptWithNoTransactions()
 	{
 		// Arrange
 		IDbContextFactory<ApplicationDbContext> contextFactory = DbContextHelpers.CreateInMemoryContextFactory();
@@ -480,10 +480,10 @@ public class ReportServiceTests
 		OutOfBalanceResult result = await service.GetOutOfBalanceAsync("date", "asc", 1, 50, CancellationToken.None);
 
 		// Assert
-		result.Items.Should().ContainSingle();
-		result.Items[0].TransactionTotal.Should().Be(0m);
-		result.Items[0].ExpectedTotal.Should().Be(11.00m);
-		result.Items[0].Difference.Should().Be(11.00m);
+		result.Items.Should().BeEmpty();
+		result.TotalCount.Should().Be(0);
+		result.TotalDiscrepancy.Should().Be(0m);
+		(await service.GetHealthSummaryAsync(CancellationToken.None)).OutOfBalanceCount.Should().Be(0);
 
 		contextFactory.ResetDatabase();
 	}

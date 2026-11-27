@@ -804,7 +804,7 @@ public class ReportsControllerTests
 
 		_mediatorMock.Setup(m => m.Send(
 			It.Is<GetDuplicateDetectionReportQuery>(q =>
-				q.MatchOn == "dateAndLocation" && q.LocationTolerance == "exact" && q.TotalTolerance == 0m),
+				q.MatchOn == "dateAndLocationAndTotal" && q.LocationTolerance == "exact" && q.TotalTolerance == 0m),
 			It.IsAny<CancellationToken>()))
 			.ReturnsAsync(reportResult);
 
@@ -817,7 +817,7 @@ public class ReportsControllerTests
 		okResult.Value!.GroupCount.Should().Be(0);
 		_mediatorMock.Verify(m => m.Send(
 			It.Is<GetDuplicateDetectionReportQuery>(q =>
-				q.MatchOn == "dateAndLocation" && q.LocationTolerance == "exact" && q.TotalTolerance == 0m),
+				q.MatchOn == "dateAndLocationAndTotal" && q.LocationTolerance == "exact" && q.TotalTolerance == 0m),
 			It.IsAny<CancellationToken>()), Times.Once);
 	}
 

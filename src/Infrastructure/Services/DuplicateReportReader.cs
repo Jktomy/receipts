@@ -16,17 +16,8 @@ public class DuplicateReportReader(IDbContextFactory<ApplicationDbContext> conte
 	{
 		await using ApplicationDbContext context = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-		List<DuplicateReceiptSummary> receipts = await (from r in context.Receipts.AsNoTracking()
-														where r.DeletedAt == null
-														let transactionTotal = context.Transactions
-															.Where(t => t.ReceiptId == r.Id && t.DeletedAt == null)
-															.Sum(t => (decimal?)t.Amount) ?? 0m
-														select new DuplicateReceiptSummary(
-															r.Id,
-															r.Location,
-															r.Date,
-															transactionTotal
-														)).ToListAsync(cancellationToken);
+		List<DuplicateReceiptSummary> receipts = await Summaries(context, context.Receipts.AsNoTracking()
+			.Where(r => r.DeletedAt == null)).ToListAsync(cancellationToken);
 
 		List<DuplicateGroup> groups = DuplicateDetectionPolicy.Group(receipts, matchOn, locationTolerance, totalTolerance);
 
@@ -78,37 +69,47 @@ public class DuplicateReportReader(IDbContextFactory<ApplicationDbContext> conte
 		List<DuplicateAcceptanceComponent> components = DuplicateAcceptancePolicy.Components(pairs);
 		HashSet<Guid> allMembers = [.. components.SelectMany(c => c.ReceiptIds)];
 
-		Dictionary<Guid, DuplicateReceiptSummary> summaries = await (
-			from r in context.Receipts.AsNoTracking()
-			where r.DeletedAt == null && allMembers.Contains(r.Id)
-			let transactionTotal = context.Transactions
-				.Where(t => t.ReceiptId == r.Id && t.DeletedAt == null)
-				.Sum(t => (decimal?)t.Amount) ?? 0m
-			select new DuplicateReceiptSummary(r.Id, r.Location, r.Date, transactionTotal))
+		Dictionary<Guid, DuplicateReceiptSummary> summaries = await Summaries(context, context.Receipts.AsNoTracking()
+			.Where(r => r.DeletedAt == null && allMembers.Contains(r.Id)))
 			.ToDictionaryAsync(s => s.ReceiptId, cancellationToken);
 
 		return DuplicateAcceptancePolicy.ProjectGroups(components, summaries);
 	}
 
+	private static IQueryable<DuplicateReceiptSummary> Summaries(ApplicationDbContext context, IQueryable<Infrastructure.Entities.Core.ReceiptEntity> receipts) =>
+		from r in receipts
+		let transactionTotal = context.Transactions
+			.Where(t => t.ReceiptId == r.Id && t.DeletedAt == null)
+			.Sum(t => (decimal?)t.Amount) ?? 0m
+		let hasPayment = context.Transactions.Any(t => t.ReceiptId == r.Id && t.DeletedAt == null)
+		let hasItems = context.ReceiptItems.Any(i => i.ReceiptId == r.Id && i.DeletedAt == null)
+		let itemTotal = context.ReceiptItems.Where(i => i.ReceiptId == r.Id && i.DeletedAt == null)
+			.Sum(i => (decimal?)i.TotalAmount) ?? 0m
+		let adjustmentTotal = context.Adjustments.Where(a => a.ReceiptId == r.Id && a.DeletedAt == null)
+			.Sum(a => (decimal?)a.Amount) ?? 0m
+		select new DuplicateReceiptSummary(r.Id, r.Location, r.Date, transactionTotal)
+		{
+			ComparisonTotal = hasPayment ? transactionTotal :
+				(hasItems && !r.TaxUnknown ? itemTotal + r.TaxAmount + adjustmentTotal : (decimal?)null)
+		};
+
 	internal static async Task<int> CountUnacceptedDefaultGroupsAsync(ApplicationDbContext context, CancellationToken cancellationToken)
 	{
-		// Project only group cardinalities; no financial totals or receipt objects are loaded for a badge.
-		var groups = await context.Receipts.AsNoTracking()
-			.GroupBy(r => new { r.Date, r.Location }).Where(g => g.Count() > 1)
-			.Select(g => new { g.Key.Date, g.Key.Location, Count = g.Count() }).ToListAsync(cancellationToken);
-		if (groups.Count == 0)
+		// Only same-date/same-location rows with an actual comparison total can be exact duplicates.
+		// First restrict to date/location collisions in SQL, then use the same stable comparison and
+		// pairwise suppression policy as the report. Do not load unrelated receipts or receipt items.
+		var receipts = context.Receipts.AsNoTracking().Where(r => r.DeletedAt == null);
+		var colliding = receipts.Where(r => receipts.Any(other =>
+			other.Id != r.Id && other.Date == r.Date && other.Location == r.Location));
+		List<DuplicateReceiptSummary> candidates = await Summaries(context, colliding).ToListAsync(cancellationToken);
+		List<DuplicateGroup> groups = DuplicateDetectionPolicy.Group(candidates, "dateAndLocationAndTotal", "exact", 0m);
+		HashSet<Guid> memberIds = [.. groups.SelectMany(g => g.Receipts).Select(r => r.ReceiptId)];
+		if (memberIds.Count == 0)
 		{
 			return 0;
 		}
-
-		var accepted = await (from pair in context.AcceptedDuplicatePairs.AsNoTracking()
-							  join a in context.Receipts on pair.ReceiptIdA equals a.Id
-							  join b in context.Receipts on pair.ReceiptIdB equals b.Id
-							  where a.Date == b.Date && a.Location == b.Location
-							  group pair by new { a.Date, a.Location } into g
-							  select new { g.Key.Date, g.Key.Location, Count = g.LongCount() }).ToListAsync(cancellationToken);
-		Dictionary<(DateOnly, string), long> acceptedCounts = accepted.ToDictionary(g => (g.Date, g.Location), g => g.Count);
-		return groups.Count(g => !DuplicateAcceptancePolicy.IsFullyAccepted(g.Count, acceptedCounts.GetValueOrDefault((g.Date, g.Location))));
+		HashSet<(Guid A, Guid B)> accepted = await LoadAcceptedPairsAsync(context, memberIds, cancellationToken);
+		return groups.Count(g => !DuplicateAcceptancePolicy.IsFullyAccepted(g.Receipts.Select(r => r.ReceiptId), accepted));
 	}
 
 	private static async Task<HashSet<(Guid A, Guid B)>> LoadAcceptedPairsAsync(

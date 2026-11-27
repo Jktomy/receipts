@@ -2946,7 +2946,7 @@ export interface paths {
         };
         /**
          * Get data-quality health summary
-         * @description Returns headline counts for the data-quality reports so the reports hub can show at a glance whether anything needs attention: out-of-balance receipts, duplicate receipt groups (matched on date + location), and uncategorized receipt items. Backed by COUNT queries only â€” no report rows are returned.
+         * @description Returns headline counts for the data-quality reports so the reports hub can show at a glance whether anything needs attention: out-of-balance receipts, duplicate receipt groups (matched on date + location + comparison total), and uncategorized receipt items. No report rows are returned.
          */
         get: operations["GetReportsHealthSummary"];
         put?: never;
@@ -2966,7 +2966,7 @@ export interface paths {
         };
         /**
          * Get out-of-balance receipts report
-         * @description Returns all receipts where item subtotal + tax + adjustments does not equal the transaction total.
+         * @description Returns receipts with at least one active payment where item subtotal + tax + adjustments does not equal the transaction total. Unlinked receipts are not discrepancies.
          */
         get: operations["GetOutOfBalanceReport"];
         put?: never;
@@ -5760,6 +5760,11 @@ export interface components {
             date: string;
             /** Format: double */
             transactionTotal: number;
+            /**
+             * Format: double
+             * @description Linked payment total, otherwise qualified receipt total, or null when unavailable.
+             */
+            comparisonTotal?: number | null;
         };
         AcceptedDuplicatesResponse: {
             /** Format: int32 */
