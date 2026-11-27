@@ -146,7 +146,10 @@ public partial class ApplicationDbContext
 	private void EnsureDuplicateAmountParents<TEntity>() where TEntity : class
 	{
 		var expected = ExpectedDuplicateAmountParents<TEntity>();
-		if (expected.Count == 0) return;
+		if (expected.Count == 0)
+		{
+			return;
+		}
 		Guid[] ids = [.. expected.Keys];
 		var stored = Set<TEntity>().IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
 			.Where(entity => ids.Contains(EF.Property<Guid>(entity, "Id")))
@@ -158,7 +161,10 @@ public partial class ApplicationDbContext
 	private async Task EnsureDuplicateAmountParentsAsync<TEntity>(CancellationToken cancellationToken) where TEntity : class
 	{
 		var expected = ExpectedDuplicateAmountParents<TEntity>();
-		if (expected.Count == 0) return;
+		if (expected.Count == 0)
+		{
+			return;
+		}
 		Guid[] ids = [.. expected.Keys];
 		var stored = await Set<TEntity>().IgnoreQueryFilters().IgnoreAutoIncludes().AsNoTracking()
 			.Where(entity => ids.Contains(EF.Property<Guid>(entity, "Id")))
